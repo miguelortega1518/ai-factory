@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +35,10 @@ class FactoryConfig:
     repo_path: Path
     base_branch: str = "main"
     test_command: str = "pytest -q"
+    # Se ejecuta en cada worktree recién creado, antes de que trabaje ningún agente (p. ej. "npm ci").
+    setup_command: str = ""
+    # Variables de entorno NO secretas para setup, tests y comandos de los agentes.
+    env: dict[str, str] = field(default_factory=dict)
     allowed_commands: list[str] = field(
         default_factory=lambda: ["pytest", "python", "npm", "npx", "node", "ruff", "ls", "cat", "git"]
     )
@@ -60,6 +66,12 @@ class FactoryConfig:
     @property
     def brain_dir(self) -> Path:
         return self.factory_dir / "brain"
+
+    @property
+    def worktrees_dir(self) -> Path:
+        # Fuera del repo: así las herramientas del proyecto (tsc, vitest, eslint…) no ven copias duplicadas.
+        tag = hashlib.sha1(str(self.repo_path).encode()).hexdigest()[:8]
+        return Path(tempfile.gettempdir()) / "ai-factory-worktrees" / f"{self.repo_path.name}-{tag}"
 
     @property
     def runs_dir(self) -> Path:

@@ -79,3 +79,21 @@ def test_critical_risk_from_gatekeeper(repo, cfg):
     rejected = factory.reject(state.run_id, "no")
     assert rejected.status == RunStatus.REJECTED
     assert [s.run_id for s in factory.list_runs()] == [state.run_id]
+
+
+def test_setup_command_and_env_reach_worktree(repo, cfg):
+    cfg.setup_command = 'echo "$FACTORY_FLAG" > setup-marker.txt'
+    cfg.env = {"FACTORY_FLAG": "preparado"}
+    cfg.test_command = cfg.test_command + ' && test "$FACTORY_FLAG" = preparado'
+    files = {**GOOD_FILES, ".gitignore": "setup-marker.txt\n"}
+    state = Factory(cfg, FakeClient(files=files), log=lambda *_: None).run(task_from_text("Añade add"))
+    assert state.status == RunStatus.SHIPPED, state.error
+    assert cfg.worktrees_dir.parent.name == "ai-factory-worktrees"
+    assert repo not in cfg.worktrees_dir.parents  # los worktrees viven fuera del repo
+
+
+def test_failing_setup_marks_run_failed(repo, cfg):
+    cfg.setup_command = "exit 3"
+    state = Factory(cfg, FakeClient(files=GOOD_FILES), log=lambda *_: None).run(task_from_text("Añade add"))
+    assert state.status == RunStatus.FAILED
+    assert "setup_command" in state.error

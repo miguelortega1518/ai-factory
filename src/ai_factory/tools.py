@@ -18,10 +18,12 @@ SUBPROCESS_ENV = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
 
 
 class Workspace:
-    def __init__(self, root: Path, allowed_commands: list[str], timeout: int = 600):
+    def __init__(self, root: Path, allowed_commands: list[str], timeout: int = 600,
+                 env: dict[str, str] | None = None):
         self.root = root.resolve()
         self.allowed = set(allowed_commands)
         self.timeout = timeout
+        self.env = {**SUBPROCESS_ENV, **(env or {})}
 
     def _path(self, rel: str) -> Path:
         p = (self.root / rel).resolve()
@@ -77,7 +79,7 @@ class Workspace:
         if argv[0] == "git" and len(argv) > 1 and argv[1] in {"push", "reset", "checkout", "rebase", "clean"}:
             raise PermissionError("La fábrica gestiona git; ese subcomando no está permitido")
         r = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, timeout=self.timeout,
-                           env=SUBPROCESS_ENV)
+                           env=self.env)
         out = f"exit_code={r.returncode}\n--- stdout ---\n{r.stdout}\n--- stderr ---\n{r.stderr}"
         return out[-_MAX_OUTPUT:]
 

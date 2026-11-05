@@ -31,7 +31,7 @@ flowchart LR
 |---|---|---|
 | 1 | `intake/` | Sentry, GitHub Issues y texto libre se convierten en el mismo `Task`. |
 | 2 | Spec Writer | Consulta **primero** el Brain y el código, y escribe una spec con criterios de aceptación y plan de tests. |
-| 3 | Builder | Crea una rama `factory/<run>` en un worktree aislado y programa con TDD hasta que los tests pasan. La fábrica **vuelve a ejecutar los tests por su cuenta**: no se fía del informe del agente. |
+| 3 | Builder | Crea una rama `factory/<run>` en un worktree aislado (fuera del repo, en el directorio temporal) y programa con TDD hasta que los tests pasan. La fábrica **vuelve a ejecutar los tests por su cuenta**: no se fía del informe del agente. |
 | 4 | Revisores | Cuatro agentes en paralelo (seguridad, UX, UI, código), cada uno con su propio modelo configurable para reducir sesgos compartidos. El de UI puede hacer capturas reales de la app con Playwright. |
 | 5 | Aprobador | Analiza las revisiones, descarta falsos positivos y devuelve instrucciones concretas al Builder hasta que todo está correcto (máx. `max_iterations`). |
 | 6 | Gatekeeper | Clasifica el riesgo. Bajo → se fusiona y despliega solo. Crítico (o toca `core_paths`) → PR con la etiqueta `needs-human-approval` y espera a `factory approve`. |
@@ -79,7 +79,9 @@ factory brain add decisions "Usar PostgreSQL" "Elegimos PostgreSQL por JSONB y m
 
 Las claves más importantes (el resto, en el `factory.toml` que genera `factory init`):
 
-- `test_command`: el comando que debe pasar para que un cambio avance.
+- `test_command`: la verificación que debe pasar para que un cambio avance. Admite `&&`, por ejemplo `npm run lint && npm test && npm run build`.
+- `setup_command`: se ejecuta en cada worktree nuevo antes de que trabajen los agentes, por ejemplo `npm ci`.
+- `[env]`: variables de entorno **no secretas** que necesitan los tests o la build.
 - `core_paths`: patrones glob del núcleo. Si se tocan, siempre hace falta un humano, diga lo que diga el Gatekeeper.
 - `auto_ship`: `merge` (fusiona en la rama base y hace push), `pr` (PR con auto-merge) o `none`.
 - `deploy_command`: se ejecuta tras fusionar un cambio.

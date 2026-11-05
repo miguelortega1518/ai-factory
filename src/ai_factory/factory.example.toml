@@ -1,7 +1,10 @@
 # Configuración de la AI Factory. Todas las claves son opcionales.
 
 base_branch = "main"
+# Verificación que debe pasar para que un cambio avance (admite &&).
 test_command = "pytest -q"
+# Se ejecuta en cada worktree nuevo antes de que trabajen los agentes, p. ej. "npm ci".
+setup_command = ""
 allowed_commands = ["pytest", "python", "npm", "npx", "node", "ruff", "ls", "cat", "git"]
 
 # Máximo de vueltas Builder ↔ Aprobador antes de rendirse.
@@ -24,6 +27,10 @@ github_repo = ""          # owner/repo
 github_label = "ai-factory"
 sentry_org = ""
 sentry_project = ""
+
+# Variables de entorno NO secretas para setup, tests y comandos de los agentes.
+[env]
+# EJEMPLO = "valor"
 
 # Modelos por agente. Usar modelos distintos en los revisores reduce sesgos compartidos.
 [agents.spec_writer]

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import fnmatch
 import json
-import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -31,7 +30,7 @@ class Factory:
         Brain(self.cfg.brain_dir).init()
         gi = self.cfg.factory_dir / ".gitignore"
         if not gi.exists():
-            gi.write_text("runs/\nworktrees/\n")
+            gi.write_text("runs/\nprocessed.json\n")
         toml = self.cfg.repo_path / "factory.toml"
         if not toml.exists():
             example = Path(__file__).with_name("factory.example.toml")
@@ -49,9 +48,10 @@ class Factory:
         wt: Path | None = None
         try:
             wt = git_ops.create_worktree(
-                self.cfg.repo_path, self.cfg.factory_dir / "worktrees", state.branch, self.cfg.base_branch
+                self.cfg.repo_path, self.cfg.worktrees_dir, state.branch, self.cfg.base_branch
             )
-            ws = Workspace(wt, self.cfg.allowed_commands)
+            self._setup(wt, audit)
+            ws = Workspace(wt, self.cfg.allowed_commands, env=self.cfg.env)
             brain = Brain(wt / ".factory" / "brain")
             agents = Agents(self.cfg, self.client, audit)
 
@@ -176,10 +176,23 @@ class Factory:
         return RunState.model_validate_json(path.read_text())
 
     # --- internos ---------------------------------------------------------------------
+    def _shell(self, command: str, cwd: Path, timeout: int = 1800) -> subprocess.CompletedProcess:
+        # Los comandos de setup/test vienen de factory.toml (no de los agentes): se permite `&&`.
+        return subprocess.run(command, shell=True, cwd=cwd, capture_output=True, text=True,
+                              timeout=timeout, env={**SUBPROCESS_ENV, **self.cfg.env})
+
+    def _setup(self, wt: Path, audit: AuditLog) -> None:
+        if not self.cfg.setup_command:
+            return
+        self.log(f"  ⚙ Preparando el worktree: {self.cfg.setup_command}")
+        r = self._shell(self.cfg.setup_command, wt)
+        audit.event("factory", "setup", code=r.returncode, output=(r.stdout + r.stderr)[-4000:])
+        if r.returncode != 0:
+            raise RuntimeError(f"setup_command falló (exit {r.returncode}): {(r.stdout + r.stderr)[-1500:]}")
+
     def _run_tests(self, wt: Path) -> tuple[bool, str]:
         """La fábrica verifica los tests por sí misma: no se fía del informe del Builder."""
-        r = subprocess.run(shlex.split(self.cfg.test_command), cwd=wt, capture_output=True, text=True,
-                           timeout=1800, env=SUBPROCESS_ENV)
+        r = self._shell(self.cfg.test_command, wt)
         return r.returncode == 0, r.stdout + r.stderr
 
     def _record_learnings(self, brain: Brain, task: Task, state: RunState) -> None:
