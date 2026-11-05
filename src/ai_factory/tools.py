@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -10,6 +11,10 @@ from pathlib import Path
 from .llm import Tool
 
 _MAX_OUTPUT = 20000
+
+# Sin bytecode: evita .pyc obsoletos cuando un archivo se reescribe con el mismo tamaño en el mismo
+# segundo, y que __pycache__ acabe en los commits de la fábrica.
+SUBPROCESS_ENV = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
 
 
 class Workspace:
@@ -71,7 +76,8 @@ class Workspace:
             raise PermissionError(f"Comando no permitido: {argv[:1]}. Permitidos: {sorted(self.allowed)}")
         if argv[0] == "git" and len(argv) > 1 and argv[1] in {"push", "reset", "checkout", "rebase", "clean"}:
             raise PermissionError("La fábrica gestiona git; ese subcomando no está permitido")
-        r = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, timeout=self.timeout)
+        r = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, timeout=self.timeout,
+                           env=SUBPROCESS_ENV)
         out = f"exit_code={r.returncode}\n--- stdout ---\n{r.stdout}\n--- stderr ---\n{r.stderr}"
         return out[-_MAX_OUTPUT:]
 

@@ -16,7 +16,7 @@ from .brain import Brain
 from .config import FactoryConfig
 from .llm import AgentError, LLMClient
 from .models import RunState, RunStatus, Task, Verdict
-from .tools import Workspace
+from .tools import SUBPROCESS_ENV, Workspace
 
 HUMAN_LABEL = "needs-human-approval"
 
@@ -178,7 +178,8 @@ class Factory:
     # --- internos ---------------------------------------------------------------------
     def _run_tests(self, wt: Path) -> tuple[bool, str]:
         """La fábrica verifica los tests por sí misma: no se fía del informe del Builder."""
-        r = subprocess.run(shlex.split(self.cfg.test_command), cwd=wt, capture_output=True, text=True, timeout=1800)
+        r = subprocess.run(shlex.split(self.cfg.test_command), cwd=wt, capture_output=True, text=True,
+                           timeout=1800, env=SUBPROCESS_ENV)
         return r.returncode == 0, r.stdout + r.stderr
 
     def _record_learnings(self, brain: Brain, task: Task, state: RunState) -> None:
