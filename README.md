@@ -51,6 +51,35 @@ pip install -e ".[dev]"          # añade ".[ui]" para capturas de UI con Playwr
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+### Usar tu suscripción de Claude en vez de una API key
+
+La fábrica tiene dos motores (`backend` en `factory.toml`):
+
+| Motor | Autenticación | Coste |
+|---|---|---|
+| `api` (por defecto) | `ANTHROPIC_API_KEY` | Pago por uso de la API |
+| `claude-code` | `CLAUDE_CODE_OAUTH_TOKEN` (suscripción Pro, Max, Team o Enterprise) | Incluido en tu suscripción; consume su cuota |
+
+Con `backend = "claude-code"`, cada agente se ejecuta con Claude Code en modo headless
+(`claude -p`) dentro de su worktree, con las herramientas de su rol:
+- **Sólo lectura** (`Read`, `Glob`, `Grep`): Spec Writer, revisores, Aprobador y Gatekeeper.
+- **Builder**: además `Edit`, `Write` y `Bash`, este último limitado a `allowed_commands` y a unas
+  pocas utilidades de lectura; `git push/commit/reset`, `npx` y `curl` están vetados.
+
+Todos corren en `--permission-mode dontAsk`, así que se deniega todo lo que no está permitido. La
+transcripción completa de cada agente queda en `.factory/runs/<run_id>/<agente>-N.jsonl`.
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude setup-token                       # genera el token con tu suscripción
+export CLAUDE_CODE_OAUTH_TOKEN=...       # o guárdalo como secreto en GitHub Actions
+```
+
+Si `CLAUDE_CODE_OAUTH_TOKEN` está definido, la fábrica quita `ANTHROPIC_API_KEY` del entorno de
+Claude Code: la API key tiene prioridad y se facturaría. Ten en cuenta que una ejecución completa
+lanza unos 8 agentes o más; los límites de uso de tu plan aplican. En este motor el revisor de UI
+no hace capturas de pantalla.
+
 ## Uso
 
 En el repositorio que quieres que la fábrica mantenga:

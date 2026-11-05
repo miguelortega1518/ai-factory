@@ -34,6 +34,9 @@ Reglas:
 - No toques archivos no relacionados con la tarea. No desactives ni borres tests para que pase.
 - Si recibes feedback de revisores/aprobador, atiende CADA punto requerido y vuelve a ejecutar tests.
 - `tests_passing` debe reflejar honestamente el resultado de la última ejecución de la suite.
+- Ejecuta comandos simples, uno por llamada (p. ej. `python -m pytest -q tests/test_x.py`); el código
+  de salida ya aparece en el resultado. No uses git para commits ni ramas: la fábrica los gestiona.
+- La fábrica vuelve a ejecutar la verificación completa después de ti: si falla, volverás a recibir la tarea.
 """
 
 _REVIEWER_BASE = """\
@@ -78,7 +81,10 @@ el diff y las revisiones de cuatro revisores independientes (seguridad, UX, UI, 
 
 Decide si el cambio está listo:
 - approved=true sólo si cumple todos los criterios de aceptación, los tests pasan y no queda
-  ningún hallazgo blocker/major válido.
+  ningún hallazgo blocker/major válido. Sobre si los tests pasan, la fuente de verdad es la
+  verificación ejecutada por la fábrica que recibes al principio, no el informe del Builder.
+- No exijas evidencias de proceso (p. ej. capturas de la fase roja de TDD) si el resultado es
+  correcto y está cubierto por tests que pasan: juzga el cambio, no la narración.
 - Si no, approved=false y `required_changes` con instrucciones concretas y accionables para el
   Builder (agrupa y deduplica el feedback; descarta hallazgos que sean incorrectos explicando por qué
   en `reasoning`).

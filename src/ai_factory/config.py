@@ -53,6 +53,10 @@ class FactoryConfig:
     push: bool = True
     ui_preview_url: str = ""
     use_fallbacks: bool = True
+    # Motor de los agentes: "api" (SDK con ANTHROPIC_API_KEY) o "claude-code" (CLI `claude -p`,
+    # que puede usar una suscripción de Claude vía CLAUDE_CODE_OAUTH_TOKEN).
+    backend: str = "api"
+    claude_bin: str = "claude"
     agents: dict[str, AgentConfig] = field(default_factory=lambda: dict(DEFAULT_AGENTS))
     github_repo: str = ""  # owner/repo para intake de issues
     github_label: str = "ai-factory"
@@ -101,4 +105,7 @@ def load_config(repo_path: str | Path = ".", config_file: str | Path | None = No
     unknown = set(data) - known
     if unknown:
         raise ValueError(f"Claves desconocidas en {path}: {sorted(unknown)}")
-    return FactoryConfig(repo_path=repo, agents=agents, **data)
+    cfg = FactoryConfig(repo_path=repo, agents=agents, **data)
+    if cfg.backend not in ("api", "claude-code"):
+        raise ValueError(f"backend debe ser 'api' o 'claude-code', no {cfg.backend!r}")
+    return cfg

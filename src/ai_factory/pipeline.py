@@ -90,7 +90,7 @@ class Factory:
                     self.log(f"    {mark} {r.reviewer} ({r.model}): {r.summary[:100]}")
 
                 self.log("  ⚑ Aprobador: analizando el feedback…")
-                state.verdict = agents.approve(state.spec, state.build, diff, state.reviews, ws)
+                state.verdict = agents.approve(state.spec, state.build, diff, state.reviews, ws, test_out)
                 self._save(state)
                 if state.verdict.approved:
                     self.log("  ✓ Aprobado.")
@@ -106,7 +106,7 @@ class Factory:
             # 6. Gate final ---------------------------------------------------------------
             files = git_ops.changed_files(wt, self.cfg.base_branch)
             core_hits = [f for f in files if any(fnmatch.fnmatch(f, p) for p in self.cfg.core_paths)]
-            state.gate = agents.gate(task, state.spec, diff, files, core_hits)
+            state.gate = agents.gate(task, state.spec, diff, files, core_hits, ws)
             if core_hits and state.gate.risk != "critical":
                 state.gate = state.gate.model_copy(
                     update={"risk": "critical", "core_areas_touched": core_hits,

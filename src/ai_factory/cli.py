@@ -23,6 +23,12 @@ from .pipeline import Factory, summarize
 
 def _factory(args) -> Factory:
     cfg = load_config(args.repo, args.config)
+    if cfg.backend == "claude-code":
+        from .claude_code import check_auth
+
+        status = check_auth(cfg.claude_bin, cfg.env)
+        print(f"Motor: Claude Code ({status.get('authMethod')})")
+        return Factory(cfg, client=None)  # type: ignore[arg-type]
     from .llm import AnthropicClient
 
     return Factory(cfg, AnthropicClient(use_fallbacks=cfg.use_fallbacks))

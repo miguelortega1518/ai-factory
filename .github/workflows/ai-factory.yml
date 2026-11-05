@@ -33,8 +33,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Instalar AI Factory y dependencias del proyecto
+      - name: Instalar AI Factory, Claude Code y dependencias del proyecto
         run: |
+          npm install -g @anthropic-ai/claude-code   # para backend = "claude-code"
           pip install "ai-factory @ git+https://github.com/${{ vars.AI_FACTORY_REPO || 'OWNER/ai-factory' }}"
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       - name: Configurar git
@@ -43,7 +44,9 @@ jobs:
           git config user.email "ai-factory@users.noreply.github.com"
       - name: Ejecutar
         env:
+          # Usa uno de los dos: API key (backend "api") o token de suscripción (backend "claude-code").
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           GH_TOKEN: ${{ github.token }}
           # Por variable de entorno, no interpolados en el script: evita inyección de comandos.

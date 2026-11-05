@@ -1,6 +1,10 @@
 # Configuración de la AI Factory. Todas las claves son opcionales.
 
 base_branch = "main"
+
+# Motor de los agentes: "api" (ANTHROPIC_API_KEY, pago por uso) o "claude-code" (CLI `claude -p`;
+# admite tu suscripción de Claude con CLAUDE_CODE_OAUTH_TOKEN, generado con `claude setup-token`).
+backend = "api"
 # Verificación que debe pasar para que un cambio avance (admite &&).
 test_command = "pytest -q"
 # Se ejecuta en cada worktree nuevo antes de que trabajen los agentes, p. ej. "npm ci".
