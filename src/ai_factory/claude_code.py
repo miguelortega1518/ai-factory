@@ -113,7 +113,7 @@ class ClaudeCodeAgent:
             proc = subprocess.run(args, input=prompt, cwd=self.cwd, capture_output=True, text=True,
                                   timeout=self.timeout, env=subprocess_env(self.env))
         except FileNotFoundError as e:
-            raise AgentError(f"No se encontró `{self.claude_bin}`. Instala Claude Code: npm i -g @anthropic-ai/claude-code") from e
+            raise AgentError(f"No se encontró `{self.claude_bin}`. Instala Claude Code: curl -fsSL https://claude.ai/install.sh | bash") from e
         except subprocess.TimeoutExpired as e:
             raise AgentError(f"{self.name}: Claude Code superó {self.timeout}s") from e
 

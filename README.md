@@ -70,7 +70,7 @@ Todos corren en `--permission-mode dontAsk`, así que se deniega todo lo que no 
 transcripción completa de cada agente queda en `.factory/runs/<run_id>/<agente>-N.jsonl`.
 
 ```bash
-npm install -g @anthropic-ai/claude-code
+curl -fsSL https://claude.ai/install.sh | bash   # instalador nativo (última versión)
 claude setup-token                       # genera el token con tu suscripción
 export CLAUDE_CODE_OAUTH_TOKEN=...       # o guárdalo como secreto en GitHub Actions
 ```

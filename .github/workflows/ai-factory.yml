@@ -35,7 +35,10 @@ jobs:
           python-version: "3.12"
       - name: Instalar AI Factory, Claude Code y dependencias del proyecto
         run: |
-          npm install -g @anthropic-ai/claude-code   # para backend = "claude-code"
+          # Claude Code (backend = "claude-code"). Instalador nativo: siempre la última versión.
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/claude" --version
           pip install "ai-factory @ git+https://github.com/${{ vars.AI_FACTORY_REPO || 'OWNER/ai-factory' }}"
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       - name: Configurar git
