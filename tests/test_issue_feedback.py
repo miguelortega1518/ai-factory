@@ -98,3 +98,16 @@ def test_pr_body_closes_issue(repo, cfg):
     cfg.github_repo = "otro/repo"
     assert issue_feedback.closes_line(st, cfg) == "Closes o/r#42"
     assert "Closes o/r#42" in Factory(cfg, None, log=lambda *_: None)._pr_body(st)
+
+
+def test_comment_carries_machine_readable_summary(repo, cfg, monkeypatch):
+    import re
+    monkeypatch.setenv("GITHUB_RUN_ID", "123456")
+    gh = GhRecorder()
+    _, state = _run(cfg, gh)
+    m = re.search(r"<!-- ai-factory:(\{.*\}) -->", gh.comments()[0])
+    data = json.loads(m.group(1))
+    assert data["status"] == "shipped" and data["actions_run_id"] == "123456"
+    assert data["commit"] == state.commit and len(data["reviews"]) == 4
+    assert {"setup", "spec", "build", "tests", "review", "approve", "gate", "ship"} <= set(data["stages"])
+    assert data["seconds"] is not None

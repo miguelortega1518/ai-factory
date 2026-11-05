@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import time
 from enum import Enum
 from typing import Literal
@@ -119,6 +120,10 @@ class RunState(BaseModel):
     iterations: int = 0
     pr_url: str = ""
     commit: str = ""  # commit de merge en la rama base, si se fusionó directamente
+    # Segundos acumulados por etapa (setup, spec, build, tests, review, approve, gate, ship).
+    stages: dict[str, float] = Field(default_factory=dict)
+    # Ejecución de GitHub Actions que lanzó esta tarea, si la hay.
+    actions_run_id: str = Field(default_factory=lambda: os.environ.get("GITHUB_RUN_ID", ""))
     error: str = ""
     started_at: float = Field(default_factory=time.time)
     finished_at: float | None = None

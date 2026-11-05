@@ -40,8 +40,27 @@ def closes_line(state: RunState, cfg: FactoryConfig) -> str:
     return f"Closes #{number}" if repo == cfg.github_repo else f"Closes {repo}#{number}"
 
 
+def summary(state: RunState) -> dict:
+    """Resumen legible por máquinas (lo lee el monitor web de la fábrica)."""
+    return {
+        "v": 1,
+        "run_id": state.run_id,
+        "actions_run_id": state.actions_run_id,
+        "status": state.status.value,
+        "iterations": state.iterations,
+        "commit": state.commit,
+        "pr_url": state.pr_url,
+        "risk": state.gate.risk if state.gate else None,
+        "error": state.error[:300],
+        "stages": state.stages,
+        "seconds": round((state.finished_at or 0) - state.started_at, 1) if state.finished_at else None,
+        "reviews": [{"reviewer": r.reviewer, "model": r.model, "passed": r.passed} for r in state.reviews],
+    }
+
+
 def _footer(state: RunState) -> str:
-    return f"\n\n<sub>AI Factory · ejecución `{state.run_id}`</sub>"
+    data = json.dumps(summary(state), ensure_ascii=False).replace("--", "\\u002d\\u002d")
+    return f"\n\n<sub>AI Factory · ejecución `{state.run_id}`</sub>\n<!-- ai-factory:{data} -->"
 
 
 def build_comment(state: RunState, cfg: FactoryConfig) -> tuple[str, bool] | None:

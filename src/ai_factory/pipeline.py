@@ -6,6 +6,7 @@ import fnmatch
 import json
 import subprocess
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from . import git_ops, issue_feedback
@@ -42,6 +43,14 @@ class Factory:
             example = Path(__file__).with_name("factory.example.toml")
             toml.write_text(example.read_text())
 
+    @contextmanager
+    def _stage(self, state: RunState, name: str):
+        t0 = time.monotonic()
+        try:
+            yield
+        finally:
+            state.stages[name] = round(state.stages.get(name, 0.0) + time.monotonic() - t0, 1)
+
     # ---------------------------------------------------------------------------------
     def run(self, task: Task) -> RunState:
         run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{task.id}"
@@ -56,14 +65,16 @@ class Factory:
             wt = git_ops.create_worktree(
                 self.cfg.repo_path, self.cfg.worktrees_dir, state.branch, self.cfg.base_branch
             )
-            self._setup(wt, audit)
+            with self._stage(state, "setup"):
+                self._setup(wt, audit)
             ws = Workspace(wt, self.cfg.allowed_commands, env=self.cfg.env)
             brain = Brain(wt / ".factory" / "brain")
             agents = Agents(self.cfg, self.client, audit)
 
             # 2. Spec ---------------------------------------------------------------------
             self.log("  ✎ Spec Writer: consultando el Brain y redactando la especificación…")
-            state.spec = agents.write_spec(task, ws, brain)
+            with self._stage(state, "spec"):
+                state.spec = agents.write_spec(task, ws, brain)
             audit.artifact("spec.json", state.spec.model_dump_json(indent=2))
             self._save(state)
 
@@ -72,10 +83,12 @@ class Factory:
             for i in range(1, self.cfg.max_iterations + 1):
                 state.iterations = i
                 self.log(f"  ⚒ Builder (iteración {i}): TDD en {state.branch}…")
-                state.build = agents.build(state.spec, ws, brain, feedback)
+                with self._stage(state, "build"):
+                    state.build = agents.build(state.spec, ws, brain, feedback)
                 git_ops.commit_all(wt, f"factory: {task.title} (iteración {i})")
 
-                ok, test_out = self._run_tests(wt)
+                with self._stage(state, "tests"):
+                    ok, test_out = self._run_tests(wt)
                 audit.event("factory", "tests", passed=ok, output=test_out[-4000:])
                 if not ok:
                     self.log("  ✗ La suite de tests falla; vuelve al Builder sin pasar por revisión.")
@@ -90,13 +103,15 @@ class Factory:
                 audit.artifact(f"diff-{i}.patch", diff)
 
                 self.log("  ⚖ Revisión paralela: seguridad · UX · UI · código…")
-                state.reviews = agents.review_all(state.spec, diff, ws)
+                with self._stage(state, "review"):
+                    state.reviews = agents.review_all(state.spec, diff, ws)
                 for r in state.reviews:
                     mark = "✓" if r.passed else "✗"
                     self.log(f"    {mark} {r.reviewer} ({r.model}): {r.summary[:100]}")
 
                 self.log("  ⚑ Aprobador: analizando el feedback…")
-                state.verdict = agents.approve(state.spec, state.build, diff, state.reviews, ws, test_out)
+                with self._stage(state, "approve"):
+                    state.verdict = agents.approve(state.spec, state.build, diff, state.reviews, ws, test_out)
                 self._save(state)
                 if state.verdict.approved:
                     self.log("  ✓ Aprobado.")
@@ -112,7 +127,8 @@ class Factory:
             # 6. Gate final ---------------------------------------------------------------
             files = git_ops.changed_files(wt, self.cfg.base_branch)
             core_hits = [f for f in files if any(fnmatch.fnmatch(f, p) for p in self.cfg.core_paths)]
-            state.gate = agents.gate(task, state.spec, diff, files, core_hits, ws)
+            with self._stage(state, "gate"):
+                state.gate = agents.gate(task, state.spec, diff, files, core_hits, ws)
             if core_hits and state.gate.risk != "critical":
                 state.gate = state.gate.model_copy(
                     update={"risk": "critical", "core_areas_touched": core_hits,
@@ -124,7 +140,8 @@ class Factory:
 
             if state.gate.risk == "low":
                 self.log("  🚀 Riesgo bajo: desplegando automáticamente.")
-                self._ship(state, wt, audit)
+                with self._stage(state, "ship"):
+                    self._ship(state, wt, audit)
             else:
                 self.log("  ✋ Riesgo crítico: requiere aprobación humana.")
                 self._request_human(state, wt, audit)
