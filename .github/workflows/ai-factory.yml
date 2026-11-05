@@ -46,10 +46,14 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           GH_TOKEN: ${{ github.token }}
+          # Por variable de entorno, no interpolados en el script: evita inyección de comandos.
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          TASK_TEXT: ${{ github.event.inputs.task }}
         run: |
-          case "${{ github.event_name }}" in
-            issues)            factory run --github-issue ${{ github.event.issue.number }} ;;
-            workflow_dispatch) factory run --task "${{ github.event.inputs.task }}" ;;
+          case "$EVENT_NAME" in
+            issues)            factory run --github-issue "$ISSUE_NUMBER" ;;
+            workflow_dispatch) factory run --task "$TASK_TEXT" ;;
             schedule)          factory intake --limit 3 ;;
           esac
       - name: Guardar auditoría
