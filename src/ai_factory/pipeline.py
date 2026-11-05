@@ -20,8 +20,13 @@ from .tools import SUBPROCESS_ENV, Workspace
 HUMAN_LABEL = "needs-human-approval"
 
 
+def _log(msg: str) -> None:
+    # Con hora y sin búfer: en CI cada línea sale al instante, así el log mide cuánto tarda cada etapa.
+    print(f"{time.strftime('%H:%M:%S')} {msg}", flush=True)
+
+
 class Factory:
-    def __init__(self, cfg: FactoryConfig, client: LLMClient, log=print, runner=subprocess.run):
+    def __init__(self, cfg: FactoryConfig, client: LLMClient, log=_log, runner=subprocess.run):
         self.cfg, self.client, self.log = cfg, client, log
         self.runner = runner  # ejecuta `gh` para informar en los issues (sustituible en tests)
 
