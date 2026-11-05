@@ -1,0 +1,60 @@
+# Copia este workflow al repositorio que quieres que la AI Factory mantenga.
+name: AI Factory
+
+on:
+  issues:
+    types: [labeled]
+  schedule:
+    - cron: "17 * * * *"   # revisa Sentry/issues pendientes cada hora
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Tarea en texto libre"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
+concurrency:
+  group: ai-factory
+  cancel-in-progress: false
+
+jobs:
+  factory:
+    if: github.event_name != 'issues' || github.event.label.name == 'ai-factory'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar AI Factory y dependencias del proyecto
+        run: |
+          pip install "ai-factory @ git+https://github.com/${{ vars.AI_FACTORY_REPO || 'OWNER/ai-factory' }}"
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Configurar git
+        run: |
+          git config user.name "ai-factory[bot]"
+          git config user.email "ai-factory@users.noreply.github.com"
+      - name: Ejecutar
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "${{ github.event_name }}" in
+            issues)            factory run --github-issue ${{ github.event.issue.number }} ;;
+            workflow_dispatch) factory run --task "${{ github.event.inputs.task }}" ;;
+            schedule)          factory intake --limit 3 ;;
+          esac
+      - name: Guardar auditoría
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-factory-runs
+          path: .factory/runs/

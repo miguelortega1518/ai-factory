@@ -1,0 +1,60 @@
+# Configuración de la AI Factory. Todas las claves son opcionales.
+
+base_branch = "main"
+test_command = "pytest -q"
+allowed_commands = ["pytest", "python", "npm", "npx", "node", "ruff", "ls", "cat", "git"]
+
+# Máximo de vueltas Builder ↔ Aprobador antes de rendirse.
+max_iterations = 3
+
+# Rutas "núcleo": si un cambio toca alguna, SIEMPRE requiere aprobación humana.
+core_paths = ["src/auth/**", "src/payments/**", "migrations/**", "infra/**", ".github/workflows/**"]
+
+# Qué hacer con cambios de bajo riesgo: "merge" | "pr" | "none"
+auto_ship = "merge"
+push = true
+# Comando de despliegue que se ejecuta tras fusionar (vacío = no desplegar).
+deploy_command = ""
+
+# URL de la app en ejecución para que el revisor de UI haga capturas (requiere playwright).
+ui_preview_url = ""
+
+# Intake
+github_repo = ""          # owner/repo
+github_label = "ai-factory"
+sentry_org = ""
+sentry_project = ""
+
+# Modelos por agente. Usar modelos distintos en los revisores reduce sesgos compartidos.
+[agents.spec_writer]
+model = "claude-opus-5-5"
+effort = "high"
+
+[agents.builder]
+model = "claude-opus-5-5"
+effort = "high"
+max_tokens = 64000
+
+[agents.reviewer_security]
+model = "claude-opus-5-5"
+effort = "high"
+
+[agents.reviewer_ux]
+model = "claude-sonnet-5-5"
+effort = "medium"
+
+[agents.reviewer_ui]
+model = "claude-sonnet-5-5"
+effort = "medium"
+
+[agents.reviewer_code]
+model = "claude-sonnet-5-5"
+effort = "high"
+
+[agents.approver]
+model = "claude-opus-5-5"
+effort = "high"
+
+[agents.gatekeeper]
+model = "claude-opus-5-5"
+effort = "medium"
