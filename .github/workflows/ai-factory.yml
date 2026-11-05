@@ -15,7 +15,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  issues: read
+  issues: write   # para comentar el resultado y cerrar el issue
 
 concurrency:
   group: ai-factory

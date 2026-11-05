@@ -29,6 +29,7 @@ ui_preview_url = ""
 # Intake
 github_repo = ""          # owner/repo
 github_label = "ai-factory"
+issue_feedback = true      # comentar el resultado en el issue y cerrarlo si se fusionó
 sentry_org = ""
 sentry_project = ""
 

@@ -36,6 +36,12 @@ flowchart LR
 | 5 | Aprobador | Analiza las revisiones, descarta falsos positivos y devuelve instrucciones concretas al Builder hasta que todo está correcto (máx. `max_iterations`). |
 | 6 | Gatekeeper | Clasifica el riesgo. Bajo → se fusiona y despliega solo. Crítico (o toca `core_paths`) → PR con la etiqueta `needs-human-approval` y espera a `factory approve`. |
 
+**Aviso en el issue:** si la tarea viene de un issue de GitHub, al terminar la fábrica comenta el
+resultado en él. Si se fusionó, enlaza el commit y cierra el issue. Si necesita aprobación humana,
+enlaza el PR, que lleva `Closes #N`. Si se rechazó o falló, explica el motivo y deja el issue
+abierto. El token de `gh` necesita permiso de escritura en *Issues*. Se desactiva con
+`issue_feedback = false`.
+
 **Brain:** notas Markdown en `.factory/brain/` (arquitectura, decisiones, convenciones,
 lecciones). Están versionadas en git, así que la memoria también es auditable. El Gatekeeper
 añade lecciones nuevas en cada ejecución y viajan en el mismo commit que el cambio.

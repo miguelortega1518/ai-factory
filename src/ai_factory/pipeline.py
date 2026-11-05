@@ -8,7 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import git_ops
+from . import git_ops, issue_feedback
 from .agents import Agents
 from .audit import AuditLog
 from .brain import Brain
@@ -21,8 +21,9 @@ HUMAN_LABEL = "needs-human-approval"
 
 
 class Factory:
-    def __init__(self, cfg: FactoryConfig, client: LLMClient, log=print):
+    def __init__(self, cfg: FactoryConfig, client: LLMClient, log=print, runner=subprocess.run):
         self.cfg, self.client, self.log = cfg, client, log
+        self.runner = runner  # ejecuta `gh` para informar en los issues (sustituible en tests)
 
     # ---------------------------------------------------------------------------------
     def init(self) -> None:
@@ -216,6 +217,7 @@ class Factory:
                            capture_output=True, text=True)
         else:
             git_ops.merge_into_base(repo, branch, base, f"factory: {state.task.title} ({state.run_id})")
+            state.commit = git_ops.git(repo, "rev-parse", "HEAD")
             if remote:
                 git_ops.push(repo, base)
         if self.cfg.deploy_command:
@@ -240,8 +242,10 @@ class Factory:
     def _pr_body(self, s: RunState) -> str:
         reviews = "\n".join(f"- {'✅' if r.passed else '❌'} **{r.reviewer}** ({r.model}): {r.summary}" for r in s.reviews)
         criteria = "\n".join(f"- {c}" for c in (s.spec.acceptance_criteria if s.spec else []))
+        closes = issue_feedback.closes_line(s, self.cfg)
         return (
             f"Generado por la AI Factory (ejecución `{s.run_id}`).\n\n"
+            + (f"{closes}\n\n" if closes else "") +
             f"**Origen:** {s.task.source.value} {s.task.url}\n\n"
             f"## Spec\n{s.spec.summary if s.spec else ''}\n\n### Criterios de aceptación\n{criteria}\n\n"
             f"## Revisiones\n{reviews}\n\n"
@@ -253,6 +257,7 @@ class Factory:
         state.finished_at = time.time()
         self._save(state)
         audit.event("factory", "finish", status=state.status.value, error=state.error)
+        issue_feedback.report(state, self.cfg, audit, run=self.runner)
         self.log(f"■ [{state.run_id}] {state.status.value}")
         return state
 

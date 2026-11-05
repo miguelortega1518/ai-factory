@@ -118,6 +118,7 @@ class RunState(BaseModel):
     gate: GateDecision | None = None
     iterations: int = 0
     pr_url: str = ""
+    commit: str = ""  # commit de merge en la rama base, si se fusionó directamente
     error: str = ""
     started_at: float = Field(default_factory=time.time)
     finished_at: float | None = None

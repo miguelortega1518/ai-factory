@@ -60,6 +60,8 @@ class FactoryConfig:
     agents: dict[str, AgentConfig] = field(default_factory=lambda: dict(DEFAULT_AGENTS))
     github_repo: str = ""  # owner/repo para intake de issues
     github_label: str = "ai-factory"
+    # Comentar el resultado en el issue de GitHub de origen y cerrarlo si se fusionó.
+    issue_feedback: bool = True
     sentry_org: str = ""
     sentry_project: str = ""
 
