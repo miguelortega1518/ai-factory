@@ -33,6 +33,11 @@ issue_feedback = true      # comentar el resultado en el issue y cerrarlo si se 
 sentry_org = ""
 sentry_project = ""
 
+# Mejora continua
+retro = true                           # retrospectiva tras cada tarea
+improve_max_issues = 3                 # propuestas como máximo por revisión periódica
+proposal_label = "ai-factory-propuesta"  # etiqueta de las propuestas (NO lanza la fábrica)
+
 # Variables de entorno NO secretas para setup, tests y comandos de los agentes.
 [env]
 # EJEMPLO = "valor"
@@ -70,3 +75,11 @@ effort = "high"
 [agents.gatekeeper]
 model = "claude-opus-5-5"
 effort = "medium"
+
+[agents.improver]   # retrospectiva tras cada tarea
+model = "claude-sonnet-5-5"
+effort = "medium"
+
+[agents.scout]      # revisión periódica del producto
+model = "claude-opus-5-5"
+effort = "high"

@@ -28,7 +28,10 @@ out = {
                     "technical_approach": "calc.py", "test_plan": ["tests/test_calc.py"]},
     "builder": {"summary": "hecho", "tests_passing": True},
     "approver": {"approved": True, "reasoning": "ok"},
-    "gatekeeper": {"risk": "low", "reasoning": "acotado", "learnings": ["Las sumas viven en calc.py"]},
+    "gatekeeper": {"risk": "low", "reasoning": "acotado"},
+    "improver": {"summary": "Limpio", "brain_updates": [{"category": "learnings", "title": "Sumas",
+                                                          "body": "Las sumas viven en calc.py"}]},
+    "scout": {"proposals": []},
 }.get(role, {"passed": True, "summary": f"{role} ok"})
 
 if role == "builder":

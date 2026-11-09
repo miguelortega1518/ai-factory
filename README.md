@@ -42,6 +42,18 @@ enlaza el PR, que lleva `Closes #N`. Si se rechazó o falló, explica el motivo 
 abierto. El token de `gh` necesita permiso de escritura en *Issues*. Se desactiva con
 `issue_feedback = false`.
 
+**Mejora continua:** un sector con dos funciones.
+- **Retrospectiva tras cada tarea** (agente `improver`). Analiza el historial de la tarea: tests en
+  rojo, hallazgos de los revisores, cambios que pidió el Aprobador y tiempos por etapa. Escribe en el
+  Brain hasta 3 notas duraderas que viajan en el mismo commit que el cambio, y deja sus conclusiones
+  y sugerencias para la fábrica en el comentario del issue. Si la tarea no se fusiona, las notas
+  sólo se proponen. Si la retrospectiva falla, la tarea no se ve afectada. Se desactiva con `retro = false`.
+- **Revisión periódica del producto** (agente `scout`, comando `factory improve`). Recorre el
+  repositorio y crea como mucho `improve_max_issues` issues de mejora con evidencia (`ruta:línea`) y
+  criterios de aceptación, con la etiqueta `ai-factory-propuesta`. Esa etiqueta **no** lanza la
+  fábrica: tú decides qué propuestas ejecutar añadiéndoles la etiqueta `ai-factory`. No repite
+  issues existentes. Con `--dry-run` sólo las muestra.
+
 **Brain:** notas Markdown en `.factory/brain/` (arquitectura, decisiones, convenciones,
 lecciones). Están versionadas en git, así que la memoria también es auditable. El Gatekeeper
 añade lecciones nuevas en cada ejecución y viajan en el mismo commit que el cambio.
@@ -106,6 +118,8 @@ factory intake --watch 300        # procesa issues con la etiqueta ai-factory y 
 factory status
 factory approve <run_id>          # aprobación humana de un cambio crítico
 factory reject <run_id> --reason "..."
+factory improve --dry-run         # mejora continua: muestra mejoras propuestas sin crear issues
+factory improve                   # crea hasta 3 issues de propuesta (etiqueta ai-factory-propuesta)
 factory brain search "autenticación"
 factory brain add decisions "Usar PostgreSQL" "Elegimos PostgreSQL por JSONB y madurez."
 ```

@@ -11,7 +11,7 @@ from ..brain import Brain
 from ..config import FactoryConfig
 from ..claude_code import ClaudeCodeAgent
 from ..llm import Agent, LLMClient, Tool
-from ..models import BuildReport, GateDecision, Review, Spec, Task, Verdict
+from ..models import BuildReport, GateDecision, Retro, Review, RunState, ScoutReport, Spec, Task, Verdict
 from ..tools import Workspace, _schema
 from . import prompts
 
@@ -120,6 +120,44 @@ class Agents:
             + f"# Diff\n```diff\n{diff[:100000]}\n```"
         )
         return agent.run(prompt, GateDecision)
+
+
+    # Mejora continua: retrospectiva ------------------------------------------------------
+    def retro(self, state: RunState, ws: Workspace, brain: Brain) -> Retro:
+        agent = self._agent("improver", prompts.IMPROVER, brain.tools() + ws.read_tools(), ws)
+        iters = []
+        for h in state.history:
+            lines = [f"## Iteración {h.iteration}", f"- Tests de la fábrica: {'verdes' if h.tests_passed else 'EN ROJO'}"]
+            for r in h.reviews:
+                lines.append(f"- Revisor {r.reviewer} ({r.model}): {'aprueba' if r.passed else 'NO aprueba'} — {r.summary}")
+                lines += [f"  - [{f.severity}] {f.file} {f.description}" for f in r.findings]
+            if h.approved is not None:
+                lines.append(f"- Aprobador: {'aprobado' if h.approved else 'pide cambios'}")
+            lines += [f"  - {c[:1500]}" for c in h.required_changes]
+            iters.append("\n".join(lines))
+        prompt = (
+            f"# Tarea\n**{state.task.title}**\n\n{state.task.body[:3000]}\n\n"
+            f"# Spec\n{state.spec.model_dump_json(indent=2) if state.spec else '(sin spec)'}\n\n"
+            f"# Historial\n" + ("\n\n".join(iters) or "(sin iteraciones)") + "\n\n"
+            f"# Resultado\nEstado: {state.status.value}. Iteraciones: {state.iterations}. "
+            f"Riesgo: {state.gate.risk if state.gate else '-'}. {state.error}\n\n"
+            f"# Segundos por etapa\n{state.stages}\n\n"
+            f"# Índice del Brain\n{brain.index()}"
+        )
+        return agent.run(prompt, Retro)
+
+    # Mejora continua: revisión periódica del producto -------------------------------------
+    def scout(self, ws: Workspace, brain: Brain, existing: list[str], max_items: int) -> ScoutReport:
+        agent = self._agent("scout", prompts.SCOUT, brain.tools() + ws.read_tools(), ws)
+        prompt = (
+            f"Propón como máximo {max_items} mejoras para este repositorio.\n\n"
+            f"Comando de verificación del proyecto: `{self.cfg.test_command}`\n"
+            f"Rutas núcleo (requieren aprobación humana): {self.cfg.core_paths or '-'}\n\n"
+            f"# Issues existentes (abiertos y cerrados recientes): no los repitas\n"
+            + ("\n".join(f"- {t}" for t in existing) or "(ninguno)")
+            + f"\n\n# Índice del Brain\n{brain.index()}"
+        )
+        return agent.run(prompt, ScoutReport)
 
 
 def _screenshot_tool(base_url: str) -> Tool:

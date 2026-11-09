@@ -94,9 +94,57 @@ class GateDecision(BaseModel):
     risk: Literal["low", "critical"]
     reasoning: str
     core_areas_touched: list[str] = Field(default_factory=list)
-    learnings: list[str] = Field(
-        default_factory=list, description="Lecciones para guardar en el Brain."
+    # Obsoleto: las lecciones las produce ahora la retrospectiva (Retro.brain_updates).
+    learnings: list[str] = Field(default_factory=list)
+
+
+class IterationRecord(BaseModel):
+    """Qué pasó en cada vuelta Builder → tests → revisores → Aprobador (lo usa la retrospectiva)."""
+
+    iteration: int
+    tests_passed: bool
+    reviews: list[Review] = Field(default_factory=list)
+    approved: bool | None = None
+    required_changes: list[str] = Field(default_factory=list)
+
+
+class BrainUpdate(BaseModel):
+    category: Literal["conventions", "learnings"]
+    title: str = Field(description="Título corto de la nota, 3–8 palabras.")
+    body: str = Field(description="La regla o lección, accionable, en 1–4 frases.")
+
+
+class Retro(BaseModel):
+    """Salida del sector de mejora continua tras cada tarea."""
+
+    summary: str = Field(description="Una o dos frases: cómo fue la tarea y por qué.")
+    went_well: list[str] = Field(default_factory=list)
+    problems: list[str] = Field(default_factory=list, description="Fricciones reales: rechazos, tests en rojo, hallazgos repetidos.")
+    brain_updates: list[BrainUpdate] = Field(
+        default_factory=list, description="0–3 notas nuevas para el Brain. Ninguna si no hay nada duradero que aprender."
     )
+    factory_suggestions: list[str] = Field(
+        default_factory=list, description="0–3 cambios a la fábrica (prompts, configuración, rutas núcleo, modelos)."
+    )
+
+
+class Proposal(BaseModel):
+    """Una mejora concreta para el producto, encontrada por la revisión periódica."""
+
+    title: str = Field(description="Título del issue, imperativo y concreto.")
+    category: Literal["bug", "tests", "deuda", "rendimiento", "ux", "seguridad"]
+    priority: Literal["alta", "media", "baja"]
+    effort: Literal["S", "M", "L"]
+    problem: str
+    evidence: list[str] = Field(description="Referencias `ruta:línea` que demuestran el problema.")
+    proposal: str
+    acceptance_criteria: list[str]
+    touches_core: bool = Field(default=False, description="True si toca rutas núcleo (requerirá aprobación humana).")
+
+
+class ScoutReport(BaseModel):
+    proposals: list[Proposal] = Field(default_factory=list)
+    notes: str = ""
 
 
 class RunStatus(str, Enum):
@@ -122,6 +170,8 @@ class RunState(BaseModel):
     commit: str = ""  # commit de merge en la rama base, si se fusionó directamente
     # Segundos acumulados por etapa (setup, spec, build, tests, review, approve, gate, ship).
     stages: dict[str, float] = Field(default_factory=dict)
+    history: list[IterationRecord] = Field(default_factory=list)
+    retro: Retro | None = None
     # Ejecución de GitHub Actions que lanzó esta tarea, si la hay.
     actions_run_id: str = Field(default_factory=lambda: os.environ.get("GITHUB_RUN_ID", ""))
     error: str = ""

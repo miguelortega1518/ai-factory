@@ -14,14 +14,14 @@ def test_low_risk_change_ships_to_main(repo, cfg):
     assert state.status == RunStatus.SHIPPED, state.error
     assert (repo / "calc.py").read_text().startswith("def add")
     assert state.spec.brain_references == ["conventions/code-style.md"]
-    # El orden del pipeline es el del vídeo: spec → builder → 4 revisores → aprobador → gate.
+    # Orden del pipeline: spec → builder → 4 revisores → aprobador → gate → mejora continua.
     assert client.calls[0] == "spec_writer"
     assert {c for c in client.calls if c.startswith("reviewer_")} == {
         "reviewer_security", "reviewer_ux", "reviewer_ui", "reviewer_code"}
-    assert client.calls[-1] == "gatekeeper"
-    # Las lecciones del gatekeeper se guardan en el Brain y viajan con el cambio.
-    learnings = list((repo / ".factory" / "brain" / "learnings").glob("*.md"))
-    assert learnings and "calc.py" in learnings[0].read_text()
+    assert client.calls[-2:] == ["gatekeeper", "improver"]
+    # Las notas de la retrospectiva se guardan en el Brain y viajan con el cambio.
+    notes = list((repo / ".factory" / "brain" / "conventions").glob("*utilidades*"))
+    assert notes and "calc.py" in notes[0].read_text()
     # Auditoría completa
     run_dir = cfg.runs_dir / state.run_id
     assert (run_dir / "spec.json").exists() and (run_dir / "diff-1.patch").exists()

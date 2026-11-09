@@ -63,6 +63,10 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--limit", type=int, default=5)
     i.add_argument("--watch", type=int, default=0, help="Repite cada N segundos (0 = una vez)")
 
+    im = sub.add_parser("improve", help="Mejora continua: revisa el producto y propone mejoras como issues")
+    im.add_argument("--max", type=int, default=None, help="Propuestas como máximo (por defecto improve_max_issues)")
+    im.add_argument("--dry-run", action="store_true", help="Sólo muestra las propuestas, no crea issues")
+
     sub.add_parser("status", help="Lista las ejecuciones")
     a = sub.add_parser("approve", help="Aprobación humana de un cambio crítico")
     a.add_argument("run_id")
@@ -141,6 +145,13 @@ def main(argv: list[str] | None = None) -> int:
             if not args.watch:
                 return 0
             time.sleep(args.watch)
+
+    if args.cmd == "improve":
+        from .improve import run_improvement
+
+        results = run_improvement(cfg, factory.client, max_items=args.max, dry_run=args.dry_run)
+        print(json.dumps(results, ensure_ascii=False, indent=2))
+        return 0
 
     if args.cmd == "approve":
         print(json.dumps(summarize(factory.approve(args.run_id)), ensure_ascii=False))

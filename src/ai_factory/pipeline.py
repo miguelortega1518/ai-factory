@@ -15,7 +15,7 @@ from .audit import AuditLog
 from .brain import Brain
 from .config import FactoryConfig
 from .llm import AgentError, LLMClient
-from .models import RunState, RunStatus, Task, Verdict
+from .models import IterationRecord, RunState, RunStatus, Task, Verdict
 from .tools import SUBPROCESS_ENV, Workspace
 
 HUMAN_LABEL = "needs-human-approval"
@@ -94,6 +94,7 @@ class Factory:
                     self.log("  ✗ La suite de tests falla; vuelve al Builder sin pasar por revisión.")
                     feedback = [f"La suite de tests (`{self.cfg.test_command}`) falla:\n{test_out[-3000:]}"]
                     state.verdict = Verdict(approved=False, reasoning="Tests en rojo", required_changes=feedback)
+                    state.history.append(IterationRecord(iteration=i, tests_passed=False, required_changes=feedback))
                     self._save(state)
                     continue
 
@@ -112,6 +113,10 @@ class Factory:
                 self.log("  ⚑ Aprobador: analizando el feedback…")
                 with self._stage(state, "approve"):
                     state.verdict = agents.approve(state.spec, state.build, diff, state.reviews, ws, test_out)
+                state.history.append(IterationRecord(
+                    iteration=i, tests_passed=True, reviews=state.reviews, approved=state.verdict.approved,
+                    required_changes=state.verdict.required_changes,
+                ))
                 self._save(state)
                 if state.verdict.approved:
                     self.log("  ✓ Aprobado.")
@@ -122,6 +127,7 @@ class Factory:
                 state.status = RunStatus.REJECTED
                 state.error = f"No aprobado tras {self.cfg.max_iterations} iteraciones"
                 self.log(f"  ✗ {state.error}. La rama {state.branch} queda para revisión manual.")
+                self._retro(agents, state, ws, brain, audit, apply=False)
                 return self._finish(state, audit)
 
             # 6. Gate final ---------------------------------------------------------------
@@ -134,7 +140,9 @@ class Factory:
                     update={"risk": "critical", "core_areas_touched": core_hits,
                             "reasoning": state.gate.reasoning + " [Forzado a critical: toca core_paths]"}
                 )
-            self._record_learnings(brain, task, state)
+            # El resultado (fusión o aprobación humana) ya está decidido: la retrospectiva lo sabe.
+            state.status = RunStatus.SHIPPED if state.gate.risk == "low" else RunStatus.AWAITING_HUMAN
+            self._retro(agents, state, ws, brain, audit, apply=True)
             git_ops.commit_all(wt, f"factory: memoria del Brain para {task.title}")
             self._save(state)
 
@@ -218,9 +226,26 @@ class Factory:
         r = self._shell(self.cfg.test_command, wt)
         return r.returncode == 0, r.stdout + r.stderr
 
-    def _record_learnings(self, brain: Brain, task: Task, state: RunState) -> None:
-        for lesson in (state.gate.learnings if state.gate else [])[:3]:
-            brain.add("learnings", lesson[:60], f"{lesson}\n\n_Origen: {task.title} ({state.run_id})_")
+    def _retro(self, agents: Agents, state: RunState, ws: Workspace, brain: Brain, audit: AuditLog,
+               apply: bool) -> None:
+        """Sector de mejora continua: retrospectiva de la tarea. Nunca rompe la ejecución."""
+        if not self.cfg.retro:
+            return
+        self.log("  ♻ Mejora continua: retrospectiva de la tarea…")
+        try:
+            with self._stage(state, "retro"):
+                state.retro = agents.retro(state, ws, brain)
+        except Exception as e:  # noqa: BLE001
+            audit.event("factory", "retro_error", error=f"{type(e).__name__}: {e}"[:1000])
+            self.log(f"    (retrospectiva no disponible: {type(e).__name__})")
+            return
+        audit.artifact("retro.json", state.retro.model_dump_json(indent=2))
+        if apply:
+            origin = f"_Origen: retrospectiva de «{state.task.title}» ({state.run_id})_"
+            for u in state.retro.brain_updates[:3]:
+                brain.add(u.category, u.title[:60], f"{u.body}\n\n{origin}")
+        self.log(f"    {len(state.retro.brain_updates)} nota(s) para el Brain, "
+                 f"{len(state.retro.factory_suggestions)} sugerencia(s) para la fábrica")
 
     def _ship(self, state: RunState, wt: Path | None, audit: AuditLog) -> None:
         repo, base, branch = self.cfg.repo_path, self.cfg.base_branch, state.branch

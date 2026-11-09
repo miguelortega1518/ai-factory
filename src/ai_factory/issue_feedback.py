@@ -55,7 +55,27 @@ def summary(state: RunState) -> dict:
         "stages": state.stages,
         "seconds": round((state.finished_at or 0) - state.started_at, 1) if state.finished_at else None,
         "reviews": [{"reviewer": r.reviewer, "model": r.model, "passed": r.passed} for r in state.reviews],
+        "retro": {
+            "brain_updates": len(state.retro.brain_updates),
+            "factory_suggestions": state.retro.factory_suggestions,
+            "problems": state.retro.problems,
+        } if state.retro else None,
     }
+
+
+def retro_section(state: RunState, applied: bool) -> str:
+    r = state.retro
+    if not r:
+        return ""
+    out = [f"\n\n### ♻ Mejora continua\n{r.summary}"]
+    if r.problems:
+        out.append("**Fricciones:**\n" + "\n".join(f"- {p}" for p in r.problems))
+    if r.brain_updates:
+        verb = "Añadido al Brain" if applied else "Propuesto para el Brain (no se aplicó: el cambio no se fusionó)"
+        out.append(f"**{verb}:**\n" + "\n".join(f"- `{u.category}` · {u.title}: {u.body}" for u in r.brain_updates))
+    if r.factory_suggestions:
+        out.append("**Sugerencias para la fábrica:**\n" + "\n".join(f"- {x}" for x in r.factory_suggestions))
+    return "\n\n".join(out)
 
 
 def _footer(state: RunState) -> str:
@@ -91,7 +111,7 @@ def build_comment(state: RunState, cfg: FactoryConfig) -> tuple[str, bool] | Non
             f"Pasó la verificación (`{cfg.test_command}`) y lo aprobó el Aprobador tras "
             f"{state.iterations} iteración(es). Gate: riesgo **{state.gate.risk if state.gate else '?'}**. {deploy}\n\n"
             f"### Revisiones\n{reviews}"
-        )
+        ) + retro_section(state, applied=True)
         return body + _footer(state), close
 
     if state.status == RunStatus.AWAITING_HUMAN:
@@ -103,6 +123,7 @@ def build_comment(state: RunState, cfg: FactoryConfig) -> tuple[str, bool] | Non
             + (f"\n\nToca rutas núcleo: {core}" if core else "")
             + f"\n\n{where}\n\nRevísalo y fusiónalo, o ejecuta `factory approve {state.run_id}`.\n\n"
             f"### Revisiones\n{reviews}"
+            + retro_section(state, applied=True)
         )
         return body + _footer(state), False
 
@@ -112,6 +133,7 @@ def build_comment(state: RunState, cfg: FactoryConfig) -> tuple[str, bool] | Non
             f"⚠️ **La AI Factory no consiguió un cambio aprobado.** {state.error}\n\n"
             + (f"Último feedback del Aprobador:\n{pending}\n\n" if pending else "")
             + f"El trabajo quedó en la rama `{state.branch}`. El issue sigue abierto."
+            + retro_section(state, applied=False)
         )
         return body + _footer(state), False
 

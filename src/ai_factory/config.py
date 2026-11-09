@@ -27,6 +27,9 @@ DEFAULT_AGENTS: dict[str, AgentConfig] = {
     "reviewer_code": AgentConfig("claude-sonnet-5-5", "high"),
     "approver": AgentConfig("claude-opus-5-5", "high"),
     "gatekeeper": AgentConfig("claude-opus-5-5", "medium"),
+    # Mejora continua: retrospectiva tras cada tarea (ligera) y revisión periódica del producto (profunda).
+    "improver": AgentConfig("claude-sonnet-5-5", "medium"),
+    "scout": AgentConfig("claude-opus-5-5", "high"),
 }
 
 
@@ -62,6 +65,10 @@ class FactoryConfig:
     github_label: str = "ai-factory"
     # Comentar el resultado en el issue de GitHub de origen y cerrarlo si se fusionó.
     issue_feedback: bool = True
+    # Mejora continua
+    retro: bool = True  # retrospectiva tras cada tarea
+    improve_max_issues: int = 3  # propuestas como máximo por revisión periódica
+    proposal_label: str = "ai-factory-propuesta"  # etiqueta de las propuestas (NO lanza la fábrica)
     sentry_org: str = ""
     sentry_project: str = ""
 

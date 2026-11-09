@@ -18,6 +18,8 @@ def _role(system: str) -> str:
         ("builder", prompts.BUILDER),
         ("approver", prompts.APPROVER),
         ("gatekeeper", prompts.GATEKEEPER),
+        ("improver", prompts.IMPROVER),
+        ("scout", prompts.SCOUT),
         *[(f"reviewer_{k}", v) for k, v in prompts.REVIEWERS.items()],
     ]:
         if system.startswith(text):
@@ -31,7 +33,11 @@ class FakeClient:
     _ids = itertools.count()
 
     def __init__(self, files: dict[str, str] | None = None, approve_on: int = 1, risk: str = "low",
-                 builder_rounds: list[dict[str, str]] | None = None):
+                 builder_rounds: list[dict[str, str]] | None = None, proposals: list[dict] | None = None,
+                 retro_fails: bool = False):
+        self.proposals = proposals if proposals is not None else []
+        self.retro_fails = retro_fails
+        self.retro_prompts: list[str] = []
         self.calls: list[str] = []
         self.approve_on = approve_on
         self.risk = risk
@@ -72,8 +78,18 @@ class FakeClient:
             return self._msg(self._use("submit_result", approved=ok, reasoning="ok" if ok else "falta caso límite",
                                        required_changes=[] if ok else ["Añade test con negativos"]))
         if role == "gatekeeper":
-            return self._msg(self._use("submit_result", risk=self.risk, reasoning="cambio acotado",
-                                       learnings=["Las utilidades matemáticas viven en calc.py"]))
+            return self._msg(self._use("submit_result", risk=self.risk, reasoning="cambio acotado"))
+        if role == "improver":
+            if self.retro_fails:
+                raise RuntimeError("API caída")
+            self.retro_prompts.append(p["messages"][0]["content"])
+            return self._msg(self._use(
+                "submit_result", summary="Salió a la primera.", problems=["El revisor de código pidió negativos"],
+                brain_updates=[{"category": "conventions", "title": "Utilidades matemáticas",
+                                "body": "Las utilidades matemáticas viven en calc.py"}],
+                factory_suggestions=["Añadir negativos al plan de tests por defecto"]))
+        if role == "scout":
+            return self._msg(self._use("submit_result", proposals=self.proposals, notes="revisado"))
         raise AssertionError(role)
 
 
