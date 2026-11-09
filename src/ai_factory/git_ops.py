@@ -59,6 +59,38 @@ def push(cwd: Path, branch: str) -> None:
     git(cwd, "push", "-u", "origin", branch)
 
 
+def sync_base(repo: Path, base: str) -> bool:
+    """Trae la última versión de `base` del remoto y avanza la local (sólo fast-forward).
+
+    Devuelve True si la base local avanzó. Necesario porque, en CI, la copia de trabajo puede ser
+    la de cuando se lanzó el evento, y otra ejecución puede haber fusionado algo después.
+    """
+    if not has_remote(repo):
+        return False
+    git(repo, "fetch", "origin", base)
+    before = git(repo, "rev-parse", base)
+    remote_sha = git(repo, "rev-parse", f"origin/{base}")
+    if before == remote_sha:
+        return False
+    current = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    if current == base:
+        git(repo, "merge", "--ff-only", f"origin/{base}")
+    else:
+        git(repo, "branch", "-f", base, f"origin/{base}")
+    return True
+
+
+def merge_base_into_branch(wt: Path, base: str) -> bool:
+    """Incorpora `base` a la rama del worktree. True si entró algo nuevo; GitError si hay conflictos."""
+    before = git(wt, "rev-parse", "HEAD")
+    r = subprocess.run(["git", "merge", "--no-edit", base], cwd=wt, capture_output=True, text=True)
+    if r.returncode != 0:
+        git(wt, "merge", "--abort", check=False)
+        raise GitError(f"La rama entra en conflicto con {base}; hace falta resolverlo a mano: "
+                       f"{(r.stdout + r.stderr).strip()[:500]}")
+    return git(wt, "rev-parse", "HEAD") != before
+
+
 def merge_into_base(repo: Path, branch: str, base: str, message: str) -> None:
     current = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
     if current != base:

@@ -62,6 +62,8 @@ class Factory:
 
         wt: Path | None = None
         try:
+            if self.cfg.push:
+                git_ops.sync_base(self.cfg.repo_path, self.cfg.base_branch)
             wt = git_ops.create_worktree(
                 self.cfg.repo_path, self.cfg.worktrees_dir, state.branch, self.cfg.base_branch
             )
@@ -263,6 +265,17 @@ class Factory:
             subprocess.run(["gh", "pr", "merge", state.pr_url, "--auto", "--squash"], cwd=repo,
                            capture_output=True, text=True)
         else:
+            # La base pudo avanzar mientras trabajábamos (p. ej. otra tarea fusionada antes):
+            # se incorpora y, si entró algo nuevo, se vuelve a verificar antes de fusionar.
+            git_ops.sync_base(repo, base)
+            if wt is not None and git_ops.merge_base_into_branch(wt, base):
+                self.log(f"  ↻ {base} avanzó mientras se trabajaba: se incorporó y se vuelve a verificar…")
+                with self._stage(state, "tests"):
+                    ok, out = self._run_tests(wt)
+                audit.event("factory", "tests_after_rebase", passed=ok, output=out[-4000:])
+                if not ok:
+                    raise RuntimeError(f"Tras incorporar los últimos cambios de {base}, la verificación falla: "
+                                       f"{out[-1500:]}")
             git_ops.merge_into_base(repo, branch, base, f"factory: {state.task.title} ({state.run_id})")
             state.commit = git_ops.git(repo, "rev-parse", "HEAD")
             if remote:
