@@ -107,7 +107,7 @@ class Factory:
 
                 self.log("  ⚖ Revisión paralela: seguridad · UX · UI · código…")
                 with self._stage(state, "review"):
-                    state.reviews = agents.review_all(state.spec, diff, ws)
+                    state.reviews = agents.review_all(state.spec, diff, ws, test_out)
                 for r in state.reviews:
                     mark = "✓" if r.passed else "✗"
                     self.log(f"    {mark} {r.reviewer} ({r.model}): {r.summary[:100]}")
@@ -248,6 +248,22 @@ class Factory:
                 brain.add(u.category, u.title[:60], f"{u.body}\n\n{origin}")
         self.log(f"    {len(state.retro.brain_updates)} nota(s) para el Brain, "
                  f"{len(state.retro.factory_suggestions)} sugerencia(s) para la fábrica")
+        self._followups(state, audit)
+
+    def _followups(self, state: RunState, audit: AuditLog) -> None:
+        """Publica como propuestas las tareas de seguimiento de la retrospectiva. Nunca rompe la ejecución."""
+        items = state.retro.followups if state.retro else []
+        if not items or not self.cfg.github_repo or self.cfg.followup_issues <= 0:
+            return
+        from .improve import publish_proposals
+
+        try:
+            created = publish_proposals(self.cfg, items, max_items=self.cfg.followup_issues,
+                                        run=self.runner, log=self.log, audit=audit,
+                                        origin=state.task.url or state.task.title)
+            state.followup_issues = [c["url"] for c in created if c["url"]]
+        except Exception as e:  # noqa: BLE001
+            audit.event("factory", "followups_error", error=f"{type(e).__name__}: {e}"[:1000])
 
     def _ship(self, state: RunState, wt: Path | None, audit: AuditLog) -> None:
         repo, base, branch = self.cfg.repo_path, self.cfg.base_branch, state.branch
@@ -265,21 +281,34 @@ class Factory:
             subprocess.run(["gh", "pr", "merge", state.pr_url, "--auto", "--squash"], cwd=repo,
                            capture_output=True, text=True)
         else:
-            # La base pudo avanzar mientras trabajábamos (p. ej. otra tarea fusionada antes):
-            # se incorpora y, si entró algo nuevo, se vuelve a verificar antes de fusionar.
-            git_ops.sync_base(repo, base)
-            if wt is not None and git_ops.merge_base_into_branch(wt, base):
-                self.log(f"  ↻ {base} avanzó mientras se trabajaba: se incorporó y se vuelve a verificar…")
-                with self._stage(state, "tests"):
-                    ok, out = self._run_tests(wt)
-                audit.event("factory", "tests_after_rebase", passed=ok, output=out[-4000:])
-                if not ok:
-                    raise RuntimeError(f"Tras incorporar los últimos cambios de {base}, la verificación falla: "
-                                       f"{out[-1500:]}")
-            git_ops.merge_into_base(repo, branch, base, f"factory: {state.task.title} ({state.run_id})")
-            state.commit = git_ops.git(repo, "rev-parse", "HEAD")
-            if remote:
-                git_ops.push(repo, base)
+            # La base pudo avanzar mientras trabajábamos (otra tarea fusionada antes, o en paralelo):
+            # se incorpora, se vuelve a verificar si entró algo nuevo, y si el push pierde la carrera
+            # se deshace la fusión local y se repite.
+            for attempt in range(1, 4):
+                git_ops.sync_base(repo, base)
+                if wt is not None and git_ops.merge_base_into_branch(wt, base):
+                    self.log(f"  ↻ {base} avanzó mientras se trabajaba: se incorporó y se vuelve a verificar…")
+                    with self._stage(state, "tests"):
+                        ok, out = self._run_tests(wt)
+                    audit.event("factory", "tests_after_rebase", passed=ok, output=out[-4000:])
+                    if not ok:
+                        raise RuntimeError(f"Tras incorporar los últimos cambios de {base}, la verificación falla: "
+                                           f"{out[-1500:]}")
+                before = git_ops.git(repo, "rev-parse", base)
+                git_ops.merge_into_base(repo, branch, base, f"factory: {state.task.title} ({state.run_id})")
+                state.commit = git_ops.git(repo, "rev-parse", "HEAD")
+                if not remote:
+                    break
+                try:
+                    git_ops.push(repo, base)
+                    break
+                except git_ops.GitError as e:
+                    if attempt == 3 or not git_ops.is_push_rejected(e):
+                        raise
+                    git_ops.git(repo, "reset", "--hard", before)  # deshace la fusión local que no se subió
+                    state.commit = ""
+                    audit.event("factory", "push_retry", attempt=attempt)
+                    self.log(f"  ↻ Otra tarea fusionó en {base} justo antes; reintento {attempt + 1}/3…")
         if self.cfg.deploy_command:
             r = subprocess.run(self.cfg.deploy_command, shell=True, cwd=repo, capture_output=True, text=True)
             audit.event("factory", "deploy", code=r.returncode, output=(r.stdout + r.stderr)[-4000:])

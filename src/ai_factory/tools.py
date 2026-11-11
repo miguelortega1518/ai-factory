@@ -53,6 +53,13 @@ class Workspace:
         p.write_text(text.replace(old, new, 1))
         return f"Editado {path}"
 
+    def delete_file(self, path: str) -> str:
+        p = self._path(path)
+        if not p.is_file():
+            raise FileNotFoundError(f"No existe el archivo {path}")
+        p.unlink()
+        return f"Borrado {path}"
+
     def list_files(self, pattern: str = "**/*") -> str:
         skip = {".git", ".factory", "node_modules", "__pycache__", ".venv", "dist", "build"}
         out = []
@@ -100,6 +107,8 @@ class Workspace:
             Tool("write_file", "Crea o sobrescribe un archivo completo.",
                  _schema(path=("string", "Ruta relativa"), content=("string", "Contenido completo")),
                  self.write_file),
+            Tool("delete_file", "Borra un archivo del repositorio (p. ej. uno que creaste y ya no hace falta).",
+                 _schema(path=("string", "Ruta relativa")), self.delete_file),
             Tool("edit_file", "Reemplaza un fragmento exacto (que aparece una sola vez) en un archivo.",
                  _schema(path=("string", "Ruta relativa"), old=("string", "Texto exacto a reemplazar"),
                          new=("string", "Texto nuevo")), self.edit_file),

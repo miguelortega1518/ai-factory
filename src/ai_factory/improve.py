@@ -41,7 +41,7 @@ def existing_titles(cfg: FactoryConfig, run: Runner) -> list[str]:
     return json.loads(out or "[]")
 
 
-def issue_body(p: Proposal, cfg: FactoryConfig) -> str:
+def issue_body(p: Proposal, cfg: FactoryConfig, origin: str = "") -> str:
     evidence = "\n".join(f"- `{e}`" for e in p.evidence) or "-"
     criteria = "\n".join(f"- {c}" for c in p.acceptance_criteria)
     core = ("\n> ⚠️ Toca rutas núcleo: aunque la fábrica lo implemente, el cambio esperará tu aprobación en un PR.\n"
@@ -51,7 +51,8 @@ def issue_body(p: Proposal, cfg: FactoryConfig) -> str:
         f"## Problema\n{p.problem}\n\n## Evidencia\n{evidence}\n\n## Propuesta\n{p.proposal}\n\n"
         f"## Criterios de aceptación\n{criteria}\n- `{cfg.test_command}` pasa.\n\n"
         f"---\n**Categoría:** {p.category} · **Prioridad:** {p.priority} · **Esfuerzo:** {p.effort}\n{core}\n"
-        f"> Propuesta del sector de **mejora continua** de la AI Factory. Si quieres que la fábrica la "
+        + (f"> Surgió como hallazgo fuera de alcance al trabajar en: {origin}\n>\n" if origin else "")
+        + f"> Propuesta del sector de **mejora continua** de la AI Factory. Si quieres que la fábrica la "
         f"implemente, añade la etiqueta `{cfg.github_label}`. Si no, ciérrala.\n"
         f"<!-- ai-factory-proposal:{meta} -->"
     )
@@ -64,6 +65,37 @@ def ensure_label(cfg: FactoryConfig, run: Runner) -> None:
              "description": "Mejora propuesta por la AI Factory. Añade ai-factory para ejecutarla."})
     except RuntimeError:
         pass  # ya existe
+
+
+def publish_proposals(cfg: FactoryConfig, proposals: list[Proposal], *, max_items: int | None = None,
+                      existing: list[str] | None = None, dry_run: bool = False, run: Runner = subprocess.run,
+                      log=print, audit: AuditLog | None = None, origin: str = "") -> list[dict]:
+    """Publica propuestas como issues con la etiqueta de propuesta, sin duplicar issues existentes."""
+    if existing is None:
+        existing = existing_titles(cfg, run) if cfg.github_repo else []
+    seen = {_norm(t) for t in existing}
+    limit = len(proposals) if max_items is None else max_items
+    results: list[dict] = []
+    for p in proposals:
+        if len(results) >= limit:
+            break
+        if _norm(p.title) in seen:
+            if audit:
+                audit.event("scout", "duplicate", title=p.title)
+            continue
+        seen.add(_norm(p.title))
+        item = {"title": p.title, "priority": p.priority, "category": p.category, "url": ""}
+        if cfg.github_repo and not dry_run:
+            if not results:
+                ensure_label(cfg, run)
+            out = _gh(run, ["api", "-X", "POST", f"repos/{cfg.github_repo}/issues", "--input", "-", "--jq", ".html_url"],
+                      {"title": p.title, "body": issue_body(p, cfg, origin), "labels": [cfg.proposal_label]})
+            item["url"] = out.strip()
+        if audit:
+            audit.event("scout", "proposal", **item)
+        log(f"  • [{p.priority}] {p.title} {item['url']}")
+        results.append(item)
+    return results
 
 
 def run_improvement(cfg: FactoryConfig, client: LLMClient | None, *, max_items: int | None = None,
@@ -82,26 +114,8 @@ def run_improvement(cfg: FactoryConfig, client: LLMClient | None, *, max_items: 
     report: ScoutReport = Agents(cfg, client, audit).scout(ws, brain, existing, max_items)
     audit.artifact("scout.json", report.model_dump_json(indent=2))
 
-    seen = {_norm(t) for t in existing}
-    results: list[dict] = []
-    for p in report.proposals:
-        if len(results) >= max_items:
-            break
-        if _norm(p.title) in seen:
-            audit.event("scout", "duplicate", title=p.title)
-            continue
-        seen.add(_norm(p.title))
-        item = {"title": p.title, "priority": p.priority, "category": p.category, "url": ""}
-        if cfg.github_repo and not dry_run:
-            if not results:
-                ensure_label(cfg, run)
-            out = _gh(run, ["api", "-X", "POST", f"repos/{cfg.github_repo}/issues", "--input", "-", "--jq", ".html_url"],
-                      {"title": p.title, "body": issue_body(p, cfg), "labels": [cfg.proposal_label]})
-            item["url"] = out.strip()
-        audit.event("scout", "proposal", **item)
-        log(f"  • [{p.priority}] {p.title} {item['url']}")
-        results.append(item)
-
+    results = publish_proposals(cfg, report.proposals, max_items=max_items, existing=existing,
+                                dry_run=dry_run, run=run, log=log, audit=audit)
     if not results:
         log(f"  Sin propuestas nuevas. {report.notes}")
     return results

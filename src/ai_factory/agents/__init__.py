@@ -76,8 +76,10 @@ class Agents:
         return agent.run(prompt, BuildReport)
 
     # 4. Revisión paralela --------------------------------------------------------------
-    def review_all(self, spec: Spec, diff: str, ws: Workspace) -> list[Review]:
+    def review_all(self, spec: Spec, diff: str, ws: Workspace, test_report: str = "") -> list[Review]:
         context = (
+            f"# Verificación ejecutada por la fábrica sobre este diff: PASÓ\n"
+            f"Comando: `{self.cfg.test_command}`\n```\n{test_report[-3000:]}\n```\n\n"
             f"# Especificación\n```json\n{spec.model_dump_json(indent=2)}\n```\n\n"
             f"# Diff contra {self.cfg.base_branch}\n```diff\n{diff[:150000]}\n```"
         )
@@ -130,7 +132,8 @@ class Agents:
             lines = [f"## Iteración {h.iteration}", f"- Tests de la fábrica: {'verdes' if h.tests_passed else 'EN ROJO'}"]
             for r in h.reviews:
                 lines.append(f"- Revisor {r.reviewer} ({r.model}): {'aprueba' if r.passed else 'NO aprueba'} — {r.summary}")
-                lines += [f"  - [{f.severity}] {f.file} {f.description}" for f in r.findings]
+                lines += [f"  - [{f.severity}]{' [FUERA DE ALCANCE]' if f.out_of_scope else ''} {f.file} "
+                          f"{f.description}" for f in r.findings]
             if h.approved is not None:
                 lines.append(f"- Aprobador: {'aprobado' if h.approved else 'pide cambios'}")
             lines += [f"  - {c[:1500]}" for c in h.required_changes]

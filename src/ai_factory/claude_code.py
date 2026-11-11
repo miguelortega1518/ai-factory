@@ -32,8 +32,8 @@ BUILD_TOOLS = "Read,Glob,Grep,Edit,Write,Bash"
 # Utilidades de sólo lectura que los modelos encadenan con frecuencia (p. ej. `pytest; echo "exit=$?"`).
 # Si falta una, Claude Code deniega el comando compuesto entero.
 SAFE_SHELL = ("echo", "pwd", "ls", "cat", "head", "tail", "wc", "grep", "sort", "true", "which")
-# Subcomandos de git de sólo lectura que el Builder puede usar.
-_GIT_READONLY = ("status", "diff", "log", "show")
+# Subcomandos de git que el Builder puede usar (lectura, y `rm` para borrar archivos del repo).
+_GIT_READONLY = ("status", "diff", "log", "show", "rm")  # rm: borrar archivos del repo (la fábrica commitea)
 # La fábrica gestiona ramas, commits y push: los agentes no.
 _DENY = [
     "Bash(git push *)", "Bash(git commit *)", "Bash(git reset *)", "Bash(git checkout *)",

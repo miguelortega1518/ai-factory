@@ -37,6 +37,7 @@ sentry_project = ""
 retro = true                           # retrospectiva tras cada tarea
 improve_max_issues = 3                 # propuestas como máximo por revisión periódica
 proposal_label = "ai-factory-propuesta"  # etiqueta de las propuestas (NO lanza la fábrica)
+followup_issues = 2                    # tareas de seguimiento por tarea, de hallazgos fuera de alcance
 
 # Variables de entorno NO secretas para setup, tests y comandos de los agentes.
 [env]

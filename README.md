@@ -32,7 +32,7 @@ flowchart LR
 | 1 | `intake/` | Sentry, GitHub Issues y texto libre se convierten en el mismo `Task`. |
 | 2 | Spec Writer | Consulta **primero** el Brain y el código, y escribe una spec con criterios de aceptación y plan de tests. |
 | 3 | Builder | Crea una rama `factory/<run>` en un worktree aislado (fuera del repo, en el directorio temporal) y programa con TDD hasta que los tests pasan. La fábrica **vuelve a ejecutar los tests por su cuenta**: no se fía del informe del agente. |
-| 4 | Revisores | Cuatro agentes en paralelo (seguridad, UX, UI, código), cada uno con su propio modelo configurable para reducir sesgos compartidos. El de UI puede hacer capturas reales de la app con Playwright. |
+| 4 | Revisores | Cuatro agentes en paralelo (seguridad, UX, UI, código), que reciben el resultado de la verificación de la fábrica, cada uno con su propio modelo configurable para reducir sesgos compartidos. El de UI puede hacer capturas reales de la app con Playwright. |
 | 5 | Aprobador | Analiza las revisiones, descarta falsos positivos y devuelve instrucciones concretas al Builder hasta que todo está correcto (máx. `max_iterations`). |
 | 6 | Gatekeeper | Clasifica el riesgo. Bajo → se fusiona y despliega solo. Crítico (o toca `core_paths`) → PR con la etiqueta `needs-human-approval` y espera a `factory approve`. |
 
@@ -53,6 +53,10 @@ abierto. El token de `gh` necesita permiso de escritura en *Issues*. Se desactiv
   criterios de aceptación, con la etiqueta `ai-factory-propuesta`. Esa etiqueta **no** lanza la
   fábrica: tú decides qué propuestas ejecutar añadiéndoles la etiqueta `ai-factory`. No repite
   issues existentes. Con `--dry-run` sólo las muestra.
+- **Tareas de seguimiento.** Los revisores marcan como `out_of_scope` los problemas que ya existían
+  antes del cambio. Esos hallazgos no bloquean la tarea. La retrospectiva agrupa los que merecen la
+  pena en hasta `followup_issues` propuestas, con la misma etiqueta `ai-factory-propuesta`, y las
+  enlaza en el comentario del issue. Así no se pierden.
 
 **Brain:** notas Markdown en `.factory/brain/` (arquitectura, decisiones, convenciones,
 lecciones). Están versionadas en git, así que la memoria también es auditable. El Gatekeeper
@@ -131,6 +135,10 @@ Las claves más importantes (el resto, en el `factory.toml` que genera `factory 
 - `test_command`: la verificación que debe pasar para que un cambio avance. Admite `&&`, por ejemplo `npm run lint && npm test && npm run build`.
 - `setup_command`: se ejecuta en cada worktree nuevo antes de que trabajen los agentes, por ejemplo `npm ci`.
 - `[env]`: variables de entorno **no secretas** que necesitan los tests o la build.
+
+**Tareas en paralelo:** se pueden lanzar varias tareas a la vez. Si otra ejecución fusiona en la
+rama base mientras tanto, la fábrica la incorpora, vuelve a verificar y reintenta la fusión hasta 3
+veces. Nunca sube nada sin verificar.
 - `core_paths`: patrones glob del núcleo. Si se tocan, siempre hace falta un humano, diga lo que diga el Gatekeeper.
 - `auto_ship`: `merge` (fusiona en la rama base y hace push), `pr` (PR con auto-merge) o `none`.
 - `deploy_command`: se ejecuta tras fusionar un cambio.

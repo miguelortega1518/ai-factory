@@ -14,6 +14,11 @@ Proceso obligatorio:
 3. Escribe criterios de aceptación verificables y un plan de tests concreto (TDD: qué test falla
    primero y por qué).
 
+Alcance y tests: `files_to_touch` lista TODOS los archivos que el cambio puede tocar, incluidos los
+de tests. Si el cambio no altera comportamiento (sólo documentación, comentarios o textos), di en
+`test_plan` "sin tests nuevos" y no cites la regla de TDD; en cualquier otro caso incluye los tests.
+Nunca escribas un criterio que prohíba añadir tests para un cambio de comportamiento.
+
 Sé concreto y conciso. No escribas código de implementación. Lista en `brain_references` las notas
 del Brain que condicionan la spec. Marca `touches_ui` si el cambio afecta a la interfaz visible.
 """
@@ -31,6 +36,9 @@ Ciclo obligatorio:
 
 Reglas:
 - Respeta las convenciones del proyecto y del Brain. Cambios pequeños y enfocados.
+- Toca sólo los archivos de `files_to_touch`. Si `test_plan` dice "sin tests nuevos", no crees
+  tests (el ciclo TDD no aplica). Si te piden quitar un archivo que creaste, bórralo con
+  `delete_file` (o `git rm <archivo>`); no lo dejes vacío.
 - No toques archivos no relacionados con la tarea. No desactives ni borres tests para que pase.
 - Si recibes feedback de revisores/aprobador, atiende CADA punto requerido y vuelve a ejecutar tests.
 - `tests_passing` debe reflejar honestamente el resultado de la última ejecución de la suite.
@@ -45,8 +53,17 @@ implementado (diff contra la rama base) frente a su especificación. Puedes leer
 entender el contexto. No modificas código: sólo reportas hallazgos.
 
 Severidades: blocker (no puede salir así), major (debe corregirse), minor (mejora recomendable),
-nit (cosmético). `passed` es false si hay algún blocker o major. Sé específico: archivo, problema y
-sugerencia concreta. No inventes problemas: si el cambio está bien en tu área, apruébalo.
+nit (cosmético). Sé específico: archivo, problema y sugerencia concreta. No inventes problemas: si
+el cambio está bien en tu área, apruébalo.
+
+Alcance: juzga el cambio, no todo el repositorio. Añadir o ampliar tests nunca es una violación del
+alcance, salvo que la especificación diga expresamente "sin tests nuevos". Si ves un problema que ya existía antes de este
+diff y queda fuera de la tarea, repórtalo igualmente con `out_of_scope: true`: no bloquea este
+cambio y se convertirá en una tarea de seguimiento. `passed` es false sólo si hay algún blocker o
+major dentro del alcance.
+
+Verificación: recibes el resultado de lint, tipos, tests y build que la fábrica ejecutó sobre este
+diff. Es la fuente de verdad sobre si compila y pasa; no digas que no pudiste ejecutarlos.
 
 Tu área de revisión:
 """
@@ -81,7 +98,8 @@ el diff y las revisiones de cuatro revisores independientes (seguridad, UX, UI, 
 
 Decide si el cambio está listo:
 - approved=true sólo si cumple todos los criterios de aceptación, los tests pasan y no queda
-  ningún hallazgo blocker/major válido. Sobre si los tests pasan, la fuente de verdad es la
+  ningún hallazgo blocker/major válido dentro del alcance. Los hallazgos con `out_of_scope: true`
+  son problemas previos al cambio: no bloquean ni deben pedirse al Builder. Sobre si los tests pasan, la fuente de verdad es la
   verificación ejecutada por la fábrica que recibes al principio, no el informe del Builder.
 - No exijas evidencias de proceso (p. ej. capturas de la fase roja de TDD) si el resultado es
   correcto y está cubierto por tests que pasan: juzga el cambio, no la narración.
@@ -123,6 +141,10 @@ Produce:
   un modelo, el comando de verificación) cuando la evidencia lo justifique, por ejemplo un hallazgo
   que se repite o una etapa desproporcionadamente lenta. Nada genérico.
 - `problems` y `went_well`: hechos observados en el historial, no opiniones vagas.
+- `followups`: 0–2 tareas de seguimiento a partir de los hallazgos marcados FUERA DE ALCANCE que
+  merezcan la pena (agrupa los que hablan de lo mismo; descarta nits y lo dudoso). Cada una con
+  evidencia `ruta:línea` que hayas comprobado leyendo el código, propuesta y criterios de aceptación,
+  como para que otro agente la implemente sin preguntas.
 
 No modificas archivos: tu salida la aplica la fábrica.
 """

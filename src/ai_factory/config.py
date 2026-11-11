@@ -69,6 +69,7 @@ class FactoryConfig:
     retro: bool = True  # retrospectiva tras cada tarea
     improve_max_issues: int = 3  # propuestas como máximo por revisión periódica
     proposal_label: str = "ai-factory-propuesta"  # etiqueta de las propuestas (NO lanza la fábrica)
+    followup_issues: int = 2  # tareas de seguimiento por tarea, de hallazgos fuera de alcance (0 = ninguna)
     sentry_org: str = ""
     sentry_project: str = ""
 

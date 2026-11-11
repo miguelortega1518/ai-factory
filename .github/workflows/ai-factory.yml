@@ -17,8 +17,10 @@ permissions:
   pull-requests: write
   issues: write   # para comentar el resultado y cerrar el issue
 
+# Una ejecución por issue: varias tareas avanzan en paralelo sin cancelarse entre sí.
+# Si dos fusionan a la vez, la fábrica incorpora la otra, vuelve a verificar y reintenta.
 concurrency:
-  group: ai-factory
+  group: ai-factory-${{ github.event.issue.number || github.run_id }}
   cancel-in-progress: false
 
 jobs:

@@ -68,6 +68,11 @@ class Finding(BaseModel):
     file: str = ""
     description: str
     suggestion: str = ""
+    out_of_scope: bool = Field(
+        default=False,
+        description="True si el problema ya existía antes de este cambio y queda fuera de la tarea: "
+        "no bloquea, se propone como tarea de seguimiento.",
+    )
 
 
 class Review(BaseModel):
@@ -126,6 +131,10 @@ class Retro(BaseModel):
     factory_suggestions: list[str] = Field(
         default_factory=list, description="0–3 cambios a la fábrica (prompts, configuración, rutas núcleo, modelos)."
     )
+    followups: list["Proposal"] = Field(
+        default_factory=list,
+        description="0–2 tareas de seguimiento a partir de hallazgos fuera de alcance que merezcan la pena.",
+    )
 
 
 class Proposal(BaseModel):
@@ -171,9 +180,13 @@ class RunState(BaseModel):
     # Segundos acumulados por etapa (setup, spec, build, tests, review, approve, gate, ship).
     stages: dict[str, float] = Field(default_factory=dict)
     history: list[IterationRecord] = Field(default_factory=list)
+    followup_issues: list[str] = Field(default_factory=list)  # URLs de las tareas de seguimiento creadas
     retro: Retro | None = None
     # Ejecución de GitHub Actions que lanzó esta tarea, si la hay.
     actions_run_id: str = Field(default_factory=lambda: os.environ.get("GITHUB_RUN_ID", ""))
     error: str = ""
     started_at: float = Field(default_factory=time.time)
     finished_at: float | None = None
+
+
+Retro.model_rebuild()

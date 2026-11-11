@@ -83,3 +83,15 @@ def test_agent_raises_on_refusal(tmp_path):
     client = _Scripted(SimpleNamespace(stop_reason="refusal", content=[], usage=None, stop_details=None))
     with pytest.raises(AgentError):
         _agent(tmp_path, client).run("x", Verdict)
+
+
+def test_builder_can_delete_files_inside_workspace(tmp_path):
+    ws = Workspace(tmp_path, [])
+    ws.write_file("tests/extra.py", "x")
+    assert ws.delete_file("tests/extra.py") == "Borrado tests/extra.py"
+    assert not (tmp_path / "tests" / "extra.py").exists()
+    with pytest.raises(PermissionError):
+        ws.delete_file("../fuera.txt")
+    with pytest.raises(FileNotFoundError):
+        ws.delete_file("no-existe.py")
+    assert "delete_file" in [t.name for t in ws.write_tools()]

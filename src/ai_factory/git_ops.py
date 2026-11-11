@@ -59,6 +59,12 @@ def push(cwd: Path, branch: str) -> None:
     git(cwd, "push", "-u", "origin", branch)
 
 
+def is_push_rejected(err: Exception) -> bool:
+    """El remoto rechazó el push porque la rama avanzó (otra ejecución fusionó antes)."""
+    msg = str(err).lower()
+    return any(k in msg for k in ("rejected", "fetch first", "non-fast-forward", "failed to push some refs"))
+
+
 def sync_base(repo: Path, base: str) -> bool:
     """Trae la última versión de `base` del remoto y avanza la local (sólo fast-forward).
 

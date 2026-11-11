@@ -59,6 +59,7 @@ def summary(state: RunState) -> dict:
             "brain_updates": len(state.retro.brain_updates),
             "factory_suggestions": state.retro.factory_suggestions,
             "problems": state.retro.problems,
+            "followup_issues": state.followup_issues,
         } if state.retro else None,
     }
 
@@ -75,6 +76,9 @@ def retro_section(state: RunState, applied: bool) -> str:
         out.append(f"**{verb}:**\n" + "\n".join(f"- `{u.category}` · {u.title}: {u.body}" for u in r.brain_updates))
     if r.factory_suggestions:
         out.append("**Sugerencias para la fábrica:**\n" + "\n".join(f"- {x}" for x in r.factory_suggestions))
+    if state.followup_issues:
+        out.append("**Tareas de seguimiento propuestas** (hallazgos fuera de alcance; añade `ai-factory` para "
+                   "ejecutarlas):\n" + "\n".join(f"- {u}" for u in state.followup_issues))
     return "\n\n".join(out)
 
 

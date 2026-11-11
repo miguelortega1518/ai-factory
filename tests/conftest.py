@@ -34,7 +34,10 @@ class FakeClient:
 
     def __init__(self, files: dict[str, str] | None = None, approve_on: int = 1, risk: str = "low",
                  builder_rounds: list[dict[str, str]] | None = None, proposals: list[dict] | None = None,
-                 retro_fails: bool = False):
+                 retro_fails: bool = False, findings: list[dict] | None = None,
+                 followups: list[dict] | None = None):
+        self.findings = findings or []
+        self.followups = followups or []
         self.proposals = proposals if proposals is not None else []
         self.retro_fails = retro_fails
         self.retro_prompts: list[str] = []
@@ -71,7 +74,8 @@ class FakeClient:
             return self._msg(self._use("submit_result", summary="hecho", tests_passing=True,
                                        files_changed=list(self.builder_rounds[0])))
         if role.startswith("reviewer_"):
-            return self._msg(self._use("submit_result", passed=True, summary=f"{role} ok"))
+            return self._msg(self._use("submit_result", passed=True, summary=f"{role} ok",
+                                       findings=self.findings if role == "reviewer_code" else []))
         if role == "approver":
             self.approver_calls += 1
             ok = self.approver_calls >= self.approve_on
@@ -87,7 +91,8 @@ class FakeClient:
                 "submit_result", summary="Salió a la primera.", problems=["El revisor de código pidió negativos"],
                 brain_updates=[{"category": "conventions", "title": "Utilidades matemáticas",
                                 "body": "Las utilidades matemáticas viven en calc.py"}],
-                factory_suggestions=["Añadir negativos al plan de tests por defecto"]))
+                factory_suggestions=["Añadir negativos al plan de tests por defecto"],
+                followups=self.followups))
         if role == "scout":
             return self._msg(self._use("submit_result", proposals=self.proposals, notes="revisado"))
         raise AssertionError(role)
