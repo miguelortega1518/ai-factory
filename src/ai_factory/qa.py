@@ -78,6 +78,10 @@ def _ready(url: str) -> bool:
 def running_app(cfg: FactoryConfig, wt: Path, audit: AuditLog):
     """Arranca la app; si no responde, lanza RuntimeError con el final de su log (puede ser culpa del cambio)."""
     env = qa_env(cfg)
+    if _ready(cfg.qa.url + cfg.qa.ready_path):
+        # Otro proceso ya responde en ese puerto: probaríamos una app que no es la del cambio.
+        raise QAEnvironmentError(f"El puerto {cfg.qa.port} ya está ocupado por otro proceso; "
+                                 f"libéralo o cambia qa.port")
     if cfg.qa.prepare_command:
         r = _shell(cfg.qa.prepare_command, wt, env)
         if r.returncode != 0:
@@ -91,7 +95,7 @@ def running_app(cfg: FactoryConfig, wt: Path, audit: AuditLog):
         while time.monotonic() < deadline:
             if proc.poll() is not None:
                 break
-            if _ready(cfg.qa.url + cfg.qa.ready_path):
+            if _ready(cfg.qa.url + cfg.qa.ready_path) and proc.poll() is None:
                 audit.event("qa", "app_ready", url=cfg.qa.url)
                 yield cfg.qa.url
                 return

@@ -31,7 +31,7 @@ READ_TOOLS = "Read,Glob,Grep"
 BUILD_TOOLS = "Read,Glob,Grep,Edit,Write,Bash"
 # Utilidades de sólo lectura que los modelos encadenan con frecuencia (p. ej. `pytest; echo "exit=$?"`).
 # Si falta una, Claude Code deniega el comando compuesto entero.
-SAFE_SHELL = ("echo", "pwd", "ls", "cat", "head", "tail", "wc", "grep", "sort", "true", "which")
+SAFE_SHELL = ("cd", "echo", "pwd", "ls", "cat", "head", "tail", "wc", "grep", "sort", "true", "which")
 # Subcomandos de git que el Builder puede usar (lectura, y `rm` para borrar archivos del repo).
 _GIT_READONLY = ("status", "diff", "log", "show", "rm")  # rm: borrar archivos del repo (la fábrica commitea)
 # La fábrica gestiona ramas, commits y push: los agentes no.
@@ -101,7 +101,7 @@ class ClaudeCodeAgent:
         if self.profile == "qa":
             # Escribe y ejecuta sus scripts de Playwright con node; nada de git, npx ni red externa.
             args += ["--tools", BUILD_TOOLS,
-                     "--allowedTools", ",".join(["Edit", "Write", *bash_rules(["node"])]),
+                     "--allowedTools", ",".join(["Edit", "Write", *bash_rules(["node", "mkdir"])]),
                      "--disallowedTools", ",".join(_DENY)]
         elif self.profile == "build":
             args += ["--tools", BUILD_TOOLS,

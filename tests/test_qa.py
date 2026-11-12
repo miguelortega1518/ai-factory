@@ -89,4 +89,35 @@ def test_qa_section_in_issue_comment(repo, cfg, tmp_path):
     body = gh.comments()[-1]
     assert "🧪 Tester funcional (pasó)" in body and "1 captura(s)" in body
     import re
-    assert json.loads(re.search(r"<!-- ai-factory:(\{.*\}) -->", body).group(1))["qa"] == {"passed": True, "checks": 1}
+    assert json.loads(re.search(r"<!-- ai-factory:(\{.*\}) -->", body).group(1))["qa"] == {
+        "passed": True, "checks": 1, "blocked": False}
+
+
+def test_blocked_tester_does_not_bounce_to_builder(repo, cfg, tmp_path):
+    _qa(cfg, tmp_path, port=38126)
+    blocked = {"passed": False, "blocked": True, "summary": "Me denegaron ejecutar node", "checks": []}
+    client = FakeClient(files=GOOD_FILES, qa_reports=[blocked])
+    state = Factory(cfg, client, log=lambda *_: None).run(task_from_text("Añade add"))
+    assert state.status == RunStatus.SHIPPED and state.iterations == 1  # siguió a revisión
+    assert "reviewer_ui" in client.calls
+    assert "NO PUDO PROBAR" in client.ui_prompts[0][0]["text"]
+    assert '"blocked"' in (cfg.runs_dir / state.run_id / "events.jsonl").read_text()
+
+
+def test_occupied_port_stops_the_task(repo, cfg, tmp_path):
+    import subprocess
+    other = subprocess.Popen([sys.executable, "-m", "http.server", "38127", "--bind", "127.0.0.1"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        import time, urllib.request
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        for _ in range(50):
+            try:
+                opener.open("http://127.0.0.1:38127/", timeout=1); break
+            except OSError:
+                time.sleep(0.1)
+        _qa(cfg, tmp_path, port=38127)
+        state = Factory(cfg, FakeClient(files=GOOD_FILES), log=lambda *_: None).run(task_from_text("Añade add"))
+        assert state.status == RunStatus.FAILED and "ya está ocupado" in state.error
+    finally:
+        other.terminate()

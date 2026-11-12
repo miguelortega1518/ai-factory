@@ -176,8 +176,12 @@ comprobar en un navegador real que el cambio hace lo que pide la especificación
 persona: navegar, rellenar formularios, pulsar botones y mirar lo que aparece.
 
 Cómo trabajar:
-- Escribe scripts Node con Playwright en tu directorio de trabajo (`const {{ chromium }} =
-  require('playwright')`) y ejecútalos con `node archivo.js`. Usa `process.env.QA_BASE_URL`.
+- Escribe scripts Node con Playwright en tu directorio de trabajo con la herramienta Write
+  (`const {{ chromium }} = require('playwright')`) y ejecútalos EXACTAMENTE así: `node archivo.js`.
+  Un comando por llamada: sin `;`, `&&` ni tuberías, y sin variables delante. `QA_BASE_URL` ya está
+  en el entorno (léelo dentro del script con `process.env.QA_BASE_URL`). El directorio
+  `screenshots/` ya existe. No hay `curl`: para la API usa `fetch` dentro del script o
+  `page.request`. Para leer o buscar en el código de la app usa Read, Glob y Grep, no la shell.
 - Guarda capturas de lo que compruebas en `screenshots/` (PNG, `fullPage: true`) y lista sus rutas
   en `screenshots`. Una por pantalla relevante, no más de 6.
 - Puedes leer el código de la app para saber rutas, textos y selectores. NO modifiques el código de
@@ -186,6 +190,10 @@ Cómo trabajar:
   reintenta: distingue un fallo de tu script de un fallo de la app.
 
 Acceso de prueba: {credentials}
+
+Si te deniegan un comando, simplifícalo (un solo `node archivo.js`) y reintenta: casi siempre
+basta. Sólo si `node archivo.js` mismo no se puede ejecutar, o el navegador no arranca, entrega
+`blocked: true` y explica qué te lo impidió. Un problema de herramientas NO es un fallo de la app.
 
 Entrega, criterio por criterio, `pass`, `fail` o `not_applicable` (lo que no se observa desde la
 app en marcha, como un test unitario o un detalle interno), con la evidencia observada. `passed` es

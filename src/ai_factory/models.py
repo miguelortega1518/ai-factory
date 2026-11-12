@@ -114,6 +114,11 @@ class QAReport(BaseModel):
 
     applicable: bool = Field(description="False si el cambio no tiene nada observable en la app en marcha.")
     passed: bool = Field(description="True si todos los checks aplicables pasan.")
+    blocked: bool = Field(
+        default=False,
+        description="True si NO pudiste probar por un problema de tus herramientas o del entorno "
+        "(un comando denegado, el navegador no arranca), no por un fallo de la app.",
+    )
     summary: str
     checks: list[QACheck] = Field(default_factory=list)
     screenshots: list[str] = Field(default_factory=list, description="Rutas de las capturas, relativas a tu directorio.")

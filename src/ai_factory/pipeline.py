@@ -142,9 +142,12 @@ class Factory:
                     with self._stage(state, "qa"):
                         qa_report, screenshots = self._run_qa(agents, state, wt, ws, audit)
                     state.qa = qa_report
-                    mark = "✓" if (qa_report.passed or not qa_report.applicable) else "✗"
+                    mark = "⚠" if qa_report.blocked else ("✓" if (qa_report.passed or not qa_report.applicable) else "✗")
                     self.log(f"    {mark} {qa_report.summary[:110]}")
-                    if qa_report.applicable and not qa_report.passed:
+                    if qa_report.blocked:
+                        # No es un fallo del cambio: no se devuelve al Builder; la revisión sigue y queda avisado.
+                        audit.event("qa", "blocked", summary=qa_report.summary[:1000])
+                    elif qa_report.applicable and not qa_report.passed:
                         failed = [f"[QA] {c.criterion}: {c.evidence}" for c in qa_report.checks if c.status == "fail"]
                         feedback = ["El tester funcional probó la app en marcha y encontró fallos: "
                                     + qa_report.summary] + (failed or [])

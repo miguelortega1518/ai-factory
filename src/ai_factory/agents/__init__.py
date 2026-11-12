@@ -84,7 +84,8 @@ class Agents:
         context = (
             f"# Verificación ejecutada por la fábrica sobre este diff: PASÓ\n"
             f"Comando: `{self.cfg.test_command}`\n```\n{test_report[-3000:]}\n```\n\n"
-            + (f"# Tester funcional (app en marcha, navegador real): {'PASÓ' if qa_report.passed else 'FALLÓ'}\n"
+            + (f"# Tester funcional (app en marcha, navegador real): "
+               f"{'NO PUDO PROBAR' if qa_report.blocked else ('PASÓ' if qa_report.passed else 'FALLÓ')}\n"
                f"{qa_report.summary}\n" + "\n".join(f"- [{c.status}] {c.criterion}: {c.evidence}" for c in qa_report.checks)
                + "\n\n" if qa_report and qa_report.applicable else "")
             + f"# Especificación\n```json\n{spec.model_dump_json(indent=2)}\n```\n\n"

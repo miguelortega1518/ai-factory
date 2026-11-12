@@ -55,7 +55,7 @@ def summary(state: RunState) -> dict:
         "stages": state.stages,
         "seconds": round((state.finished_at or 0) - state.started_at, 1) if state.finished_at else None,
         "reviews": [{"reviewer": r.reviewer, "model": r.model, "passed": r.passed} for r in state.reviews],
-        "qa": {"passed": state.qa.passed, "checks": len(state.qa.checks)}
+        "qa": {"passed": state.qa.passed, "checks": len(state.qa.checks), "blocked": state.qa.blocked}
         if state.qa and state.qa.applicable else None,
         "retro": {
             "brain_updates": len(state.retro.brain_updates),
@@ -68,6 +68,8 @@ def summary(state: RunState) -> dict:
 
 def qa_section(state: RunState) -> str:
     q = state.qa
+    if q and q.blocked:
+        return f"\n\n### ⚠️ Tester funcional: no pudo probar\n{q.summary}"
     if not q or not q.applicable:
         return ""
     icon = {"pass": "✅", "fail": "❌", "not_applicable": "➖"}
