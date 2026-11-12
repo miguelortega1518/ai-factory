@@ -141,6 +141,7 @@ def build_comment(state: RunState, cfg: FactoryConfig) -> tuple[str, bool] | Non
             + (f"\n\nToca rutas núcleo: {core}" if core else "")
             + f"\n\n{where}\n\nRevísalo y fusiónalo, o ejecuta `factory approve {state.run_id}`.\n\n"
             f"### Revisiones\n{reviews}"
+            + qa_section(state)
             + retro_section(state, applied=True)
         )
         return body + _footer(state), False

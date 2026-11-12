@@ -121,3 +121,13 @@ def test_occupied_port_stops_the_task(repo, cfg, tmp_path):
         assert state.status == RunStatus.FAILED and "ya está ocupado" in state.error
     finally:
         other.terminate()
+
+
+def test_qa_section_also_when_awaiting_human(repo, cfg, tmp_path):
+    _qa(cfg, tmp_path, port=38128)
+    cfg.github_repo, cfg.core_paths = "o/r", ["calc.py"]
+    gh = GhRecorder()
+    state = Factory(cfg, FakeClient(files=GOOD_FILES), log=lambda *_: None, runner=gh).run(
+        task_from_github_issue(ISSUE, "o/r"))
+    assert state.status == RunStatus.AWAITING_HUMAN
+    assert "🧪 Tester funcional (pasó)" in gh.comments()[-1]
