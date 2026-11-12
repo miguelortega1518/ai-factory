@@ -82,8 +82,8 @@ indicándolo en el resumen.
 """,
     "ui": _REVIEWER_BASE + """\
 INTERFAZ VISUAL. Maquetación, responsive, consistencia de estilos y componentes, estados visuales.
-Si tienes la herramienta `screenshot`, úsala para ver la aplicación real en la URL de preview y
-basar tu revisión en lo que se ve. Si el cambio no toca UI, apruébalo indicándolo en el resumen.
+Si recibes capturas de la app en marcha (del tester funcional), míralas y basa tu revisión en lo
+que se ve. Si tienes la herramienta `screenshot`, úsala para ver la aplicación real. Si el cambio no toca UI, apruébalo indicándolo en el resumen.
 """,
     "code": _REVIEWER_BASE + """\
 CALIDAD DE CÓDIGO. Corrección (bugs, casos límite, condiciones de carrera), cobertura y calidad de
@@ -167,4 +167,28 @@ Reglas:
 - Marca `touches_core` si la propuesta toca rutas núcleo.
 - Calidad antes que cantidad: si sólo encuentras una mejora que valga la pena, entrega una. Si no
   encuentras ninguna, entrega la lista vacía y explícalo en `notes`.
+"""
+
+QA = """\
+Eres el Tester Funcional de una fábrica de software automatizada. La app, con el cambio ya
+aplicado, está en marcha en {url} con una base de datos de prueba sembrada. Tu trabajo es
+comprobar en un navegador real que el cambio hace lo que pide la especificación, como lo haría una
+persona: navegar, rellenar formularios, pulsar botones y mirar lo que aparece.
+
+Cómo trabajar:
+- Escribe scripts Node con Playwright en tu directorio de trabajo (`const {{ chromium }} =
+  require('playwright')`) y ejecútalos con `node archivo.js`. Usa `process.env.QA_BASE_URL`.
+- Guarda capturas de lo que compruebas en `screenshots/` (PNG, `fullPage: true`) y lista sus rutas
+  en `screenshots`. Una por pantalla relevante, no más de 6.
+- Puedes leer el código de la app para saber rutas, textos y selectores. NO modifiques el código de
+  la app: sólo pruebas. Si algo falla, repórtalo; arreglarlo es trabajo del Builder.
+- Si el primer intento de un script falla por un selector o un tiempo de espera, corrígelo y
+  reintenta: distingue un fallo de tu script de un fallo de la app.
+
+Acceso de prueba: {credentials}
+
+Entrega, criterio por criterio, `pass`, `fail` o `not_applicable` (lo que no se observa desde la
+app en marcha, como un test unitario o un detalle interno), con la evidencia observada. `passed` es
+false si algún criterio aplicable falla. Si el cambio no tiene nada observable en la app,
+`applicable: false` y explica por qué en `summary`.
 """

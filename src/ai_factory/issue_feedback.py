@@ -55,6 +55,8 @@ def summary(state: RunState) -> dict:
         "stages": state.stages,
         "seconds": round((state.finished_at or 0) - state.started_at, 1) if state.finished_at else None,
         "reviews": [{"reviewer": r.reviewer, "model": r.model, "passed": r.passed} for r in state.reviews],
+        "qa": {"passed": state.qa.passed, "checks": len(state.qa.checks)}
+        if state.qa and state.qa.applicable else None,
         "retro": {
             "brain_updates": len(state.retro.brain_updates),
             "factory_suggestions": state.retro.factory_suggestions,
@@ -62,6 +64,16 @@ def summary(state: RunState) -> dict:
             "followup_issues": state.followup_issues,
         } if state.retro else None,
     }
+
+
+def qa_section(state: RunState) -> str:
+    q = state.qa
+    if not q or not q.applicable:
+        return ""
+    icon = {"pass": "✅", "fail": "❌", "not_applicable": "➖"}
+    checks = "\n".join(f"- {icon[c.status]} {c.criterion}" for c in q.checks)
+    shots = f"\n\n{len(q.screenshots)} captura(s) en la auditoría de la ejecución." if q.screenshots else ""
+    return f"\n\n### 🧪 Tester funcional ({'pasó' if q.passed else 'falló'})\n{q.summary}\n\n{checks}{shots}"
 
 
 def retro_section(state: RunState, applied: bool) -> str:
@@ -115,7 +127,7 @@ def build_comment(state: RunState, cfg: FactoryConfig) -> tuple[str, bool] | Non
             f"Pasó la verificación (`{cfg.test_command}`) y lo aprobó el Aprobador tras "
             f"{state.iterations} iteración(es). Gate: riesgo **{state.gate.risk if state.gate else '?'}**. {deploy}\n\n"
             f"### Revisiones\n{reviews}"
-        ) + retro_section(state, applied=True)
+        ) + qa_section(state) + retro_section(state, applied=True)
         return body + _footer(state), close
 
     if state.status == RunStatus.AWAITING_HUMAN:

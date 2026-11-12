@@ -30,7 +30,34 @@ DEFAULT_AGENTS: dict[str, AgentConfig] = {
     # Mejora continua: retrospectiva tras cada tarea (ligera) y revisión periódica del producto (profunda).
     "improver": AgentConfig("claude-sonnet-5-5", "medium"),
     "scout": AgentConfig("claude-opus-5-5", "high"),
+    # Tester funcional: escribe y ejecuta pruebas de navegador sobre la app en marcha.
+    "qa": AgentConfig("claude-sonnet-5-5", "medium"),
 }
+
+
+@dataclass
+class QAConfig:
+    """Tester funcional: arranca la app y comprueba el cambio en un navegador real (Playwright)."""
+
+    enabled: bool = False
+    # Sólo se ejecuta si el diff toca alguna de estas rutas (vacío = siempre).
+    paths: list[str] = field(default_factory=list)
+    # Una vez por tarea, antes de la primera prueba: preparar la base de datos (migrar, sembrar…).
+    setup_command: str = ""
+    # Antes de cada arranque, tras la build (p. ej. copiar estáticos a .next/standalone).
+    prepare_command: str = ""
+    # Arranca la app en primer plano; recibe PORT y HOSTNAME en el entorno.
+    start_command: str = ""
+    port: int = 3100
+    ready_path: str = "/"
+    ready_timeout: int = 120
+    # Cómo entrar en la app de prueba (usuarios del seed, nunca credenciales reales).
+    credentials: str = ""
+    env: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}"
 
 
 @dataclass
@@ -61,6 +88,7 @@ class FactoryConfig:
     backend: str = "api"
     claude_bin: str = "claude"
     agents: dict[str, AgentConfig] = field(default_factory=lambda: dict(DEFAULT_AGENTS))
+    qa: QAConfig = field(default_factory=QAConfig)
     github_repo: str = ""  # owner/repo para intake de issues
     github_label: str = "ai-factory"
     # Comentar el resultado en el issue de GitHub de origen y cerrarlo si se fusionó.
@@ -111,11 +139,17 @@ def load_config(repo_path: str | Path = ".", config_file: str | Path | None = No
             max_tokens=int(raw.get("max_tokens", base.max_tokens)),
         )
 
-    known = set(FactoryConfig.__dataclass_fields__) - {"repo_path", "agents"}
+    qa_raw = data.pop("qa", {}) or {}
+    qa_unknown = set(qa_raw) - set(QAConfig.__dataclass_fields__)
+    if qa_unknown:
+        raise ValueError(f"Claves desconocidas en [qa] de {path}: {sorted(qa_unknown)}")
+    qa = QAConfig(**qa_raw)
+
+    known = set(FactoryConfig.__dataclass_fields__) - {"repo_path", "agents", "qa"}
     unknown = set(data) - known
     if unknown:
         raise ValueError(f"Claves desconocidas en {path}: {sorted(unknown)}")
-    cfg = FactoryConfig(repo_path=repo, agents=agents, **data)
+    cfg = FactoryConfig(repo_path=repo, agents=agents, qa=qa, **data)
     if cfg.backend not in ("api", "claude-code"):
         raise ValueError(f"backend debe ser 'api' o 'claude-code', no {cfg.backend!r}")
     return cfg

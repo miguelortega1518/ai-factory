@@ -81,6 +81,7 @@ class ClaudeCodeAgent:
     claude_bin: str = "claude"
     env: dict[str, str] = field(default_factory=dict)
     timeout: int = 3600
+    add_dirs: list[Path] = field(default_factory=list)  # directorios extra legibles (--add-dir)
 
     def command(self, schema: dict) -> list[str]:
         args = [
@@ -95,7 +96,14 @@ class ClaudeCodeAgent:
             "--strict-mcp-config",
             "--append-system-prompt", self.system + BRAIN_HINT,
         ]
-        if self.profile == "build":
+        for d in self.add_dirs:
+            args += ["--add-dir", str(d)]
+        if self.profile == "qa":
+            # Escribe y ejecuta sus scripts de Playwright con node; nada de git, npx ni red externa.
+            args += ["--tools", BUILD_TOOLS,
+                     "--allowedTools", ",".join(["Edit", "Write", *bash_rules(["node"])]),
+                     "--disallowedTools", ",".join(_DENY)]
+        elif self.profile == "build":
             args += ["--tools", BUILD_TOOLS,
                      "--allowedTools", ",".join(["Edit", "Write", *bash_rules(self.allowed_commands)]),
                      "--disallowedTools", ",".join(_DENY)]

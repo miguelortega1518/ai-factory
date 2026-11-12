@@ -9,13 +9,15 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import git_ops, issue_feedback
+import shutil
+
+from . import git_ops, issue_feedback, qa
 from .agents import Agents
 from .audit import AuditLog
 from .brain import Brain
 from .config import FactoryConfig
 from .llm import AgentError, LLMClient
-from .models import IterationRecord, RunState, RunStatus, Task, Verdict
+from .models import IterationRecord, QAReport, RunState, RunStatus, Task, Verdict
 from .tools import SUBPROCESS_ENV, Workspace
 
 HUMAN_LABEL = "needs-human-approval"
@@ -42,6 +44,33 @@ class Factory:
         if not toml.exists():
             example = Path(__file__).with_name("factory.example.toml")
             toml.write_text(example.read_text())
+
+    def _qa_dir(self, state: RunState) -> Path:
+        return self.cfg.worktrees_dir / f"qa-{state.run_id}"
+
+    def _run_qa(self, agents: Agents, state: RunState, wt: Path, ws: Workspace,
+                audit: AuditLog) -> tuple[QAReport, list[Path]]:
+        qa_dir = self._qa_dir(state)
+        first = not qa_dir.exists()
+        (qa_dir / "screenshots").mkdir(parents=True, exist_ok=True)
+        if first:
+            qa.setup_database(self.cfg, wt, audit)  # QAEnvironmentError: infraestructura, detiene la tarea
+        env = qa.qa_env(self.cfg)
+        qa_ws = Workspace(qa_dir, ["node", "ls", "cat"], env=env)
+        try:
+            with qa.running_app(self.cfg, wt, audit) as url:
+                report = agents.qa(state.spec, ws, qa_ws, url, env)
+        except (qa.QAEnvironmentError, AgentError):
+            raise
+        except RuntimeError as e:  # la app no arrancó con el cambio: es un fallo del cambio
+            report = QAReport(applicable=True, passed=False,
+                              summary=f"La app no arranca con este cambio: {str(e)[:1500]}")
+        finally:
+            if qa.guard_worktree(wt, audit):
+                self.log("    (el tester modificó el código de la app; se deshizo)")
+        shots = qa.collect_screenshots(qa_dir, report.screenshots, audit)
+        audit.artifact("qa.json", report.model_dump_json(indent=2))
+        return report, shots
 
     @contextmanager
     def _stage(self, state: RunState, name: str):
@@ -105,18 +134,39 @@ class Factory:
                     raise AgentError("El Builder no produjo ningún cambio")
                 audit.artifact(f"diff-{i}.patch", diff)
 
+                # Tester funcional: la app en marcha, en un navegador real -----------------
+                qa_report: QAReport | None = None
+                screenshots: list[Path] = []
+                if qa.applies(self.cfg, git_ops.changed_files(wt, self.cfg.base_branch)):
+                    self.log("  🧪 Tester funcional: arrancando la app y probándola en el navegador…")
+                    with self._stage(state, "qa"):
+                        qa_report, screenshots = self._run_qa(agents, state, wt, ws, audit)
+                    state.qa = qa_report
+                    mark = "✓" if (qa_report.passed or not qa_report.applicable) else "✗"
+                    self.log(f"    {mark} {qa_report.summary[:110]}")
+                    if qa_report.applicable and not qa_report.passed:
+                        failed = [f"[QA] {c.criterion}: {c.evidence}" for c in qa_report.checks if c.status == "fail"]
+                        feedback = ["El tester funcional probó la app en marcha y encontró fallos: "
+                                    + qa_report.summary] + (failed or [])
+                        state.verdict = Verdict(approved=False, reasoning="QA en rojo", required_changes=feedback)
+                        state.history.append(IterationRecord(iteration=i, tests_passed=True, qa=qa_report,
+                                                             required_changes=feedback))
+                        self._save(state)
+                        continue
+
                 self.log("  ⚖ Revisión paralela: seguridad · UX · UI · código…")
                 with self._stage(state, "review"):
-                    state.reviews = agents.review_all(state.spec, diff, ws, test_out)
+                    state.reviews = agents.review_all(state.spec, diff, ws, test_out, qa_report, screenshots)
                 for r in state.reviews:
                     mark = "✓" if r.passed else "✗"
                     self.log(f"    {mark} {r.reviewer} ({r.model}): {r.summary[:100]}")
 
                 self.log("  ⚑ Aprobador: analizando el feedback…")
                 with self._stage(state, "approve"):
-                    state.verdict = agents.approve(state.spec, state.build, diff, state.reviews, ws, test_out)
+                    state.verdict = agents.approve(state.spec, state.build, diff, state.reviews, ws, test_out,
+                                                   qa_report)
                 state.history.append(IterationRecord(
-                    iteration=i, tests_passed=True, reviews=state.reviews, approved=state.verdict.approved,
+                    iteration=i, tests_passed=True, qa=qa_report, reviews=state.reviews, approved=state.verdict.approved,
                     required_changes=state.verdict.required_changes,
                 ))
                 self._save(state)
@@ -166,6 +216,7 @@ class Factory:
         finally:
             if wt is not None:
                 git_ops.remove_worktree(self.cfg.repo_path, wt)
+            shutil.rmtree(self._qa_dir(state), ignore_errors=True)
 
     # ---------------------------------------------------------------------------------
     def approve(self, run_id: str) -> RunState:

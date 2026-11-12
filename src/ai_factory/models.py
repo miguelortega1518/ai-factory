@@ -103,11 +103,28 @@ class GateDecision(BaseModel):
     learnings: list[str] = Field(default_factory=list)
 
 
+class QACheck(BaseModel):
+    criterion: str = Field(description="El criterio de aceptación o comportamiento comprobado.")
+    status: Literal["pass", "fail", "not_applicable"]
+    evidence: str = Field(description="Qué se hizo y qué se observó (pasos, textos vistos, códigos HTTP).")
+
+
+class QAReport(BaseModel):
+    """Salida del tester funcional."""
+
+    applicable: bool = Field(description="False si el cambio no tiene nada observable en la app en marcha.")
+    passed: bool = Field(description="True si todos los checks aplicables pasan.")
+    summary: str
+    checks: list[QACheck] = Field(default_factory=list)
+    screenshots: list[str] = Field(default_factory=list, description="Rutas de las capturas, relativas a tu directorio.")
+
+
 class IterationRecord(BaseModel):
     """Qué pasó en cada vuelta Builder → tests → revisores → Aprobador (lo usa la retrospectiva)."""
 
     iteration: int
     tests_passed: bool
+    qa: QAReport | None = None
     reviews: list[Review] = Field(default_factory=list)
     approved: bool | None = None
     required_changes: list[str] = Field(default_factory=list)
@@ -182,6 +199,7 @@ class RunState(BaseModel):
     history: list[IterationRecord] = Field(default_factory=list)
     followup_issues: list[str] = Field(default_factory=list)  # URLs de las tareas de seguimiento creadas
     retro: Retro | None = None
+    qa: QAReport | None = None
     # Ejecución de GitHub Actions que lanzó esta tarea, si la hay.
     actions_run_id: str = Field(default_factory=lambda: os.environ.get("GITHUB_RUN_ID", ""))
     error: str = ""

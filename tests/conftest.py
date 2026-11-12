@@ -13,6 +13,8 @@ from ai_factory.config import FactoryConfig
 
 
 def _role(system: str) -> str:
+    if system.startswith(prompts.QA.split("{")[0]):
+        return "qa"
     for name, text in [
         ("spec_writer", prompts.SPEC_WRITER),
         ("builder", prompts.BUILDER),
@@ -35,7 +37,12 @@ class FakeClient:
     def __init__(self, files: dict[str, str] | None = None, approve_on: int = 1, risk: str = "low",
                  builder_rounds: list[dict[str, str]] | None = None, proposals: list[dict] | None = None,
                  retro_fails: bool = False, findings: list[dict] | None = None,
-                 followups: list[dict] | None = None):
+                 followups: list[dict] | None = None, qa_reports: list[dict] | None = None,
+                 qa_touches_code: bool = False):
+        self.qa_reports = qa_reports or []
+        self.qa_touches_code = qa_touches_code
+        self.qa_seen: list[str] = []
+        self.ui_prompts: list = []
         self.findings = findings or []
         self.followups = followups or []
         self.proposals = proposals if proposals is not None else []
@@ -73,7 +80,28 @@ class FakeClient:
                 return self._msg(*uses, self._use("run_command", command="ls"))
             return self._msg(self._use("submit_result", summary="hecho", tests_passing=True,
                                        files_changed=list(self.builder_rounds[0])))
+        if role == "qa":
+            import re
+            import urllib.request
+            prompt = p["messages"][0]["content"]
+            url = re.search(r"La app está en (\S+)\.", prompt).group(1)
+            qa_dir = re.search(r"capturas es `([^`]+)`", prompt).group(1)
+            app_dir = re.search(r"código de la app está en `([^`]+)`", prompt).group(1)
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            self.qa_seen.append(opener.open(url, timeout=5).read().decode())  # la app responde de verdad
+            from pathlib import Path as _P
+            (_P(qa_dir) / "screenshots" / "home.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+            if self.qa_touches_code:
+                (_P(app_dir) / "calc.py").write_text("roto = True\n")
+            n = len(self.qa_seen) - 1
+            report = self.qa_reports[min(n, len(self.qa_reports) - 1)] if self.qa_reports else {}
+            return self._msg(self._use("submit_result", **{
+                "applicable": True, "passed": True, "summary": "La app hace lo esperado",
+                "checks": [{"criterion": "add(2,3)==5 visible", "status": "pass", "evidence": "visto"}],
+                "screenshots": ["screenshots/home.png"], **report}))
         if role.startswith("reviewer_"):
+            if role == "reviewer_ui":
+                self.ui_prompts.append(p["messages"][0]["content"])
             return self._msg(self._use("submit_result", passed=True, summary=f"{role} ok",
                                        findings=self.findings if role == "reviewer_code" else []))
         if role == "approver":

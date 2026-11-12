@@ -11,7 +11,7 @@ from ..brain import Brain
 from ..config import FactoryConfig
 from ..claude_code import ClaudeCodeAgent
 from ..llm import Agent, LLMClient, Tool
-from ..models import BuildReport, GateDecision, Retro, Review, RunState, ScoutReport, Spec, Task, Verdict
+from ..models import BuildReport, GateDecision, QAReport, Retro, Review, RunState, ScoutReport, Spec, Task, Verdict
 from ..tools import Workspace, _schema
 from . import prompts
 
@@ -21,9 +21,10 @@ REVIEWER_NAMES = ("security", "ux", "ui", "code")
 class Agents:
     def __init__(self, cfg: FactoryConfig, client: LLMClient, audit: AuditLog):
         self.cfg, self.client, self.audit = cfg, client, audit
+        self.qa_env: dict[str, str] = dict(cfg.env)
 
     def _agent(self, name: str, system: str, tools: list[Tool], ws: Workspace,
-               profile: str = "read") -> Agent | ClaudeCodeAgent:
+               profile: str = "read", add_dirs: list[Path] | None = None) -> Agent | ClaudeCodeAgent:
         if self.cfg.backend == "claude-code":
             # Claude Code usa sus propias herramientas (Read/Grep/Edit/Bash); el Brain se lee como archivos.
             return ClaudeCodeAgent(
@@ -36,7 +37,8 @@ class Agents:
                 allowed_commands=self.cfg.allowed_commands,
                 max_turns=self.cfg.max_agent_turns,
                 claude_bin=self.cfg.claude_bin,
-                env=self.cfg.env,
+                env=self.cfg.env if profile != "qa" else self.qa_env,
+                add_dirs=list(add_dirs or []),
             )
         return Agent(
             name=name,
@@ -76,11 +78,16 @@ class Agents:
         return agent.run(prompt, BuildReport)
 
     # 4. Revisión paralela --------------------------------------------------------------
-    def review_all(self, spec: Spec, diff: str, ws: Workspace, test_report: str = "") -> list[Review]:
+    def review_all(self, spec: Spec, diff: str, ws: Workspace, test_report: str = "",
+                   qa_report: QAReport | None = None, screenshots: list[Path] | None = None) -> list[Review]:
+        screenshots = screenshots or []
         context = (
             f"# Verificación ejecutada por la fábrica sobre este diff: PASÓ\n"
             f"Comando: `{self.cfg.test_command}`\n```\n{test_report[-3000:]}\n```\n\n"
-            f"# Especificación\n```json\n{spec.model_dump_json(indent=2)}\n```\n\n"
+            + (f"# Tester funcional (app en marcha, navegador real): {'PASÓ' if qa_report.passed else 'FALLÓ'}\n"
+               f"{qa_report.summary}\n" + "\n".join(f"- [{c.status}] {c.criterion}: {c.evidence}" for c in qa_report.checks)
+               + "\n\n" if qa_report and qa_report.applicable else "")
+            + f"# Especificación\n```json\n{spec.model_dump_json(indent=2)}\n```\n\n"
             f"# Diff contra {self.cfg.base_branch}\n```diff\n{diff[:150000]}\n```"
         )
 
@@ -89,15 +96,45 @@ class Agents:
             if name == "ui" and self.cfg.ui_preview_url:
                 tools.append(_screenshot_tool(self.cfg.ui_preview_url))
             agent_name = f"reviewer_{name}"
-            review = self._agent(agent_name, prompts.REVIEWERS[name], tools, ws).run(context, Review)
+            prompt: str | list = context
+            add_dirs: list[Path] = []
+            if name == "ui" and screenshots:
+                if self.cfg.backend == "claude-code":
+                    add_dirs = [screenshots[0].parent]
+                    prompt = context + "\n\n# Capturas de la app en marcha (ábrelas con Read antes de opinar)\n" + \
+                        "\n".join(f"- {p}" for p in screenshots)
+                else:
+                    prompt = [{"type": "text", "text": context + "\n\n# Capturas de la app en marcha"}] + [
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                                     "data": base64.standard_b64encode(p.read_bytes()).decode()}}
+                        for p in screenshots[:4]]
+            review = self._agent(agent_name, prompts.REVIEWERS[name], tools, ws, add_dirs=add_dirs).run(prompt, Review)
             return review.model_copy(update={"reviewer": name, "model": self.cfg.agent(agent_name).model})
 
         with ThreadPoolExecutor(max_workers=len(REVIEWER_NAMES)) as pool:
             return list(pool.map(one, REVIEWER_NAMES))
 
+    # Tester funcional -----------------------------------------------------------------
+    def qa(self, spec: Spec, ws: Workspace, qa_ws: Workspace, url: str, env: dict[str, str]) -> QAReport:
+        self.qa_env = env
+        system = prompts.QA.format(url=url, credentials=self.cfg.qa.credentials or "(la app no requiere login)")
+        tools = qa_ws.read_tools() + qa_ws.write_tools() + qa_ws.exec_tools() + [
+            Tool("app_read_file", "Lee un archivo del código de la app (sólo lectura).",
+                 _schema(path=("string", "Ruta relativa a la raíz del repo")), ws.read_file),
+            Tool("app_search", "Busca una regex en el código de la app (sólo lectura).",
+                 _schema(pattern=("string", "Regex extendida")), ws.search),
+        ]
+        agent = self._agent("qa", system, tools, qa_ws, profile="qa", add_dirs=[ws.root])
+        prompt = (
+            f"# Especificación del cambio\n```json\n{spec.model_dump_json(indent=2)}\n```\n\n"
+            f"La app está en {url}. El código de la app está en `{ws.root}` (sólo lectura). "
+            f"Tu directorio de trabajo para scripts y capturas es `{qa_ws.root}`."
+        )
+        return agent.run(prompt, QAReport)
+
     # 5. Aprobador ----------------------------------------------------------------------
     def approve(self, spec: Spec, build: BuildReport, diff: str, reviews: list[Review], ws: Workspace,
-                test_report: str = "") -> Verdict:
+                test_report: str = "", qa_report: QAReport | None = None) -> Verdict:
         agent = self._agent("approver", prompts.APPROVER, ws.read_tools(), ws)
         prompt = (
             f"# Verificación ejecutada por la fábrica (fuente de verdad sobre los tests)\n"
@@ -105,7 +142,9 @@ class Agents:
             f"Si el informe del Builder dice que no pudo ejecutar los tests, esta verificación lo sustituye.\n"
             f"```\n{test_report[-3000:]}\n```\n\n"
             f"# Especificación\n```json\n{spec.model_dump_json(indent=2)}\n```\n\n"
-            f"# Informe del Builder\n```json\n{build.model_dump_json(indent=2)}\n```\n\n"
+            + (f"# Tester funcional (app en marcha): {'PASÓ' if qa_report.passed else 'FALLÓ'}\n"
+               f"{qa_report.model_dump_json(indent=2)}\n\n" if qa_report and qa_report.applicable else "")
+            + f"# Informe del Builder\n```json\n{build.model_dump_json(indent=2)}\n```\n\n"
             f"# Revisiones\n```json\n[{','.join(r.model_dump_json() for r in reviews)}]\n```\n\n"
             f"# Diff\n```diff\n{diff[:150000]}\n```"
         )
