@@ -102,8 +102,12 @@ class ForjaClient:
         body = {"status": status, **{k: v for k, v in extra.items() if v is not None}}
         return self.request("PATCH", f"/api/tasks/{task_id}", body)
 
+    COMMENT_MAX = 2000  # límite de Forja (addCommentSchema)
+
     def comment(self, task_id: str, content: str) -> dict:
-        return self.request("POST", f"/api/tasks/{task_id}/comments", {"content": content[:4900]})
+        if len(content) > self.COMMENT_MAX:
+            content = content[: self.COMMENT_MAX - 1].rstrip() + "…"
+        return self.request("POST", f"/api/tasks/{task_id}/comments", {"content": content})
 
 
 def forja_title(task: Task) -> str:
@@ -184,7 +188,9 @@ class ForjaTracker:
         self._safe(f"move:{status}", go)
 
     def finish(self, state: RunState, summary: str) -> None:
-        def go():
+        """Enlaces, estado final y comentario, en ese orden: lo importante (el estado) va antes que
+        el comentario, para que un comentario rechazado nunca deje la tarea en un estado viejo."""
+        def links():
             if not self.task_id:
                 return
             link = state.pr_url or (
@@ -195,8 +201,7 @@ class ForjaTracker:
                 fields["prUrl"] = link
             if fields:
                 self.client.update(self.task_id, **fields)
-            self.client.comment(self.task_id, summary)
-        self._safe("finish", go)
+        self._safe("links", links)
         if state.status == RunStatus.SHIPPED and not state.pr_url:
             self.move("completada")
         elif state.status in (RunStatus.SHIPPED, RunStatus.AWAITING_HUMAN):
@@ -205,6 +210,7 @@ class ForjaTracker:
             area = "qa" if state.status == RunStatus.REJECTED else "otro"
             self.move("bloqueada", blockedByArea=area,
                       blockedByAreaText=(f"AI Factory: {state.error}"[:500] if area == "otro" else None))
+        self._safe("comment", lambda: self.task_id and self.client.comment(self.task_id, summary))
 
 
 def summary_text(state: RunState, cfg: FactoryConfig) -> str:

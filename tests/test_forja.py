@@ -74,7 +74,7 @@ def test_rejected_task_is_blocked_in_qa(repo, cfg, monkeypatch):
     cfg.max_iterations = 1
     _factory(cfg, fake, monkeypatch, approve_on=99).run(task_from_text("Añade add"))
     assert statuses(fake)[-1] == "bloqueada"
-    assert fake.calls[-1] == ("status", "bloqueada", {"blockedByArea": "qa"})
+    assert ("status", "bloqueada", {"blockedByArea": "qa"}) in fake.calls
 
 
 def test_existing_task_is_reused(repo, cfg, monkeypatch):
@@ -117,3 +117,27 @@ def test_title_and_kind():
     assert forja_title(t) == "#42 Añade add" and kind_for(t) == "bug"
     assert kind_for(task_from_text("Corregir el error 500 del login")) == "bug"
     assert kind_for(task_from_text("Añadir filtro")) == "mejora"
+
+
+def test_long_summary_is_truncated_and_status_moves_before_comment(repo, cfg, monkeypatch):
+    from ai_factory.forja import ForjaClient as RealClient
+
+    class Recording(RealClient):
+        def __init__(self):
+            super().__init__("https://forja.example"); self.sent = []
+
+        def request(self, method, path, body=None):
+            self.sent.append((method, path, body))
+            if path.endswith("/comments"):
+                assert len(body["content"]) <= self.COMMENT_MAX
+            return {"id": "t-1", "status": "no_iniciada", "user": {"id": "bot-1"}} if method != "GET" else []
+
+    client = Recording()
+    client.comment("t-1", "x" * 5000)
+    assert len(client.sent[-1][2]["content"]) == RealClient.COMMENT_MAX and client.sent[-1][2]["content"].endswith("…")
+
+    fake = FakeForja()
+    cfg.max_iterations = 1
+    _factory(cfg, fake, monkeypatch, approve_on=99).run(task_from_text("Añade add"))
+    kinds = [c[0] for c in fake.calls]
+    assert kinds.index("comment") > max(i for i, k in enumerate(kinds) if k == "status")  # estado antes que comentario
