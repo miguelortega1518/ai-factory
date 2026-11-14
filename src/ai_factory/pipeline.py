@@ -91,6 +91,9 @@ class Factory:
         self.log(f"▶ [{run_id}] {task.title}")
         self._tracker = ForjaTracker(self.cfg, audit)
         self._tracker.start(state)
+        if self.cfg.forja.enabled:
+            self.log(f"  📋 Forja: tarea registrada en «{self.cfg.forja.project}»" if self._tracker.task_id
+                     else f"  ⚠ Forja: no se registrará esta tarea. {self._tracker.disabled_reason}")
 
         wt: Path | None = None
         try:
@@ -410,7 +413,10 @@ class Factory:
         if tracker is None or tracker.audit is not audit:
             tracker = ForjaTracker(self.cfg, audit)  # aprobación o rechazo humano: se busca la tarea existente
             tracker.start(state)
+        had_task = bool(tracker.task_id)
         tracker.finish(state, summary_text(state, self.cfg))
+        if self.cfg.forja.enabled and had_task and tracker.disabled_reason:
+            self.log(f"  ⚠ Forja: la tarea no se actualizó del todo. {tracker.disabled_reason}")
         self._tracker = None
         self.log(f"■ [{state.run_id}] {state.status.value}")
         return state

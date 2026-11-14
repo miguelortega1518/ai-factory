@@ -96,8 +96,11 @@ def test_forja_failure_never_breaks_the_run(repo, cfg, monkeypatch):
 def test_missing_credentials_disable_tracking(repo, cfg, monkeypatch):
     fake = FakeForja()
     factory = _factory(cfg, fake, monkeypatch)
+    logs = []
+    factory.log = logs.append
     monkeypatch.delenv("FORJA_PASSWORD")
     state = factory.run(task_from_text("Añade add"))
+    assert any("⚠ Forja" in line and "FORJA_PASSWORD" in line for line in logs)  # visible en el log
     assert state.status == RunStatus.SHIPPED and fake.calls == []
     assert "FORJA_PASSWORD" in (cfg.runs_dir / state.run_id / "events.jsonl").read_text()
 
