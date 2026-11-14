@@ -58,6 +58,14 @@ abierto. El token de `gh` necesita permiso de escritura en *Issues*. Se desactiv
   pena en hasta `followup_issues` propuestas, con la misma etiqueta `ai-factory-propuesta`, y las
   enlaza en el comentario del issue. Así no se pierden.
 
+**Actividad en Forja:** con `[forja]`, la fábrica trabaja como un miembro más del equipo en
+[Forja](https://github.com/miguelortega1518/sgf-app). Con una cuenta propia crea una tarea por cada
+encargo en el proyecto configurado y la mueve según avanza: En progreso al programar, En code review
+al revisar, Hecho al fusionar (con la rama, el enlace al commit o al PR y un comentario de resumen) y
+Bloqueada si se rechaza (área «qa») o falla. Si relanzas un issue, reutiliza su tarea. Las
+credenciales van sólo por entorno (`FORJA_EMAIL`, `FORJA_PASSWORD` y opcionalmente `FORJA_URL`), y
+un fallo de Forja nunca rompe una ejecución: queda en la auditoría.
+
 **Brain:** notas Markdown en `.factory/brain/` (arquitectura, decisiones, convenciones,
 lecciones). Están versionadas en git, así que la memoria también es auditable. El Gatekeeper
 añade lecciones nuevas en cada ejecución y viajan en el mismo commit que el cambio.

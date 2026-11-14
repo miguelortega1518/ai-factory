@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 
 from . import git_ops, issue_feedback, qa
+from .forja import ForjaTracker, summary_text
 from .agents import Agents
 from .audit import AuditLog
 from .brain import Brain
@@ -88,6 +89,8 @@ class Factory:
         audit.event("factory", "task", task=task.model_dump(mode="json"))
         self._save(state)
         self.log(f"▶ [{run_id}] {task.title}")
+        self._tracker = ForjaTracker(self.cfg, audit)
+        self._tracker.start(state)
 
         wt: Path | None = None
         try:
@@ -114,6 +117,7 @@ class Factory:
             for i in range(1, self.cfg.max_iterations + 1):
                 state.iterations = i
                 self.log(f"  ⚒ Builder (iteración {i}): TDD en {state.branch}…")
+                self._tracker.move("en_proceso")
                 with self._stage(state, "build"):
                     state.build = agents.build(state.spec, ws, brain, feedback)
                 git_ops.commit_all(wt, f"factory: {task.title} (iteración {i})")
@@ -158,6 +162,7 @@ class Factory:
                         continue
 
                 self.log("  ⚖ Revisión paralela: seguridad · UX · UI · código…")
+                self._tracker.move("en_revision")
                 with self._stage(state, "review"):
                     state.reviews = agents.review_all(state.spec, diff, ws, test_out, qa_report, screenshots)
                 for r in state.reviews:
@@ -401,6 +406,12 @@ class Factory:
         self._save(state)
         audit.event("factory", "finish", status=state.status.value, error=state.error)
         issue_feedback.report(state, self.cfg, audit, run=self.runner)
+        tracker = getattr(self, "_tracker", None)
+        if tracker is None or tracker.audit is not audit:
+            tracker = ForjaTracker(self.cfg, audit)  # aprobación o rechazo humano: se busca la tarea existente
+            tracker.start(state)
+        tracker.finish(state, summary_text(state, self.cfg))
+        self._tracker = None
         self.log(f"■ [{state.run_id}] {state.status.value}")
         return state
 

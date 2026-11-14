@@ -61,6 +61,18 @@ class QAConfig:
 
 
 @dataclass
+class ForjaConfig:
+    """Registrar el trabajo de la fábrica como tareas de un proyecto de Forja.
+
+    Credenciales sólo por entorno: FORJA_EMAIL y FORJA_PASSWORD (la URL también puede venir de FORJA_URL).
+    """
+
+    enabled: bool = False
+    url: str = ""
+    project: str = "AI Factory"
+
+
+@dataclass
 class FactoryConfig:
     repo_path: Path
     base_branch: str = "main"
@@ -89,6 +101,7 @@ class FactoryConfig:
     claude_bin: str = "claude"
     agents: dict[str, AgentConfig] = field(default_factory=lambda: dict(DEFAULT_AGENTS))
     qa: QAConfig = field(default_factory=QAConfig)
+    forja: ForjaConfig = field(default_factory=ForjaConfig)
     github_repo: str = ""  # owner/repo para intake de issues
     github_label: str = "ai-factory"
     # Comentar el resultado en el issue de GitHub de origen y cerrarlo si se fusionó.
@@ -144,12 +157,17 @@ def load_config(repo_path: str | Path = ".", config_file: str | Path | None = No
     if qa_unknown:
         raise ValueError(f"Claves desconocidas en [qa] de {path}: {sorted(qa_unknown)}")
     qa = QAConfig(**qa_raw)
+    forja_raw = data.pop("forja", {}) or {}
+    forja_unknown = set(forja_raw) - set(ForjaConfig.__dataclass_fields__)
+    if forja_unknown:
+        raise ValueError(f"Claves desconocidas en [forja] de {path}: {sorted(forja_unknown)}")
+    forja = ForjaConfig(**forja_raw)
 
-    known = set(FactoryConfig.__dataclass_fields__) - {"repo_path", "agents", "qa"}
+    known = set(FactoryConfig.__dataclass_fields__) - {"repo_path", "agents", "qa", "forja"}
     unknown = set(data) - known
     if unknown:
         raise ValueError(f"Claves desconocidas en {path}: {sorted(unknown)}")
-    cfg = FactoryConfig(repo_path=repo, agents=agents, qa=qa, **data)
+    cfg = FactoryConfig(repo_path=repo, agents=agents, qa=qa, forja=forja, **data)
     if cfg.backend not in ("api", "claude-code"):
         raise ValueError(f"backend debe ser 'api' o 'claude-code', no {cfg.backend!r}")
     return cfg

@@ -52,6 +52,9 @@ jobs:
           # Usa uno de los dos: API key (backend "api") o token de suscripción (backend "claude-code").
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Opcional: registrar el trabajo en Forja (sección [forja] de factory.toml).
+          FORJA_EMAIL: ${{ secrets.FORJA_EMAIL }}
+          FORJA_PASSWORD: ${{ secrets.FORJA_PASSWORD }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           GH_TOKEN: ${{ github.token }}
           # Por variable de entorno, no interpolados en el script: evita inyección de comandos.

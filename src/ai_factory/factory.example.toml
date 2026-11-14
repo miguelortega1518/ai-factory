@@ -39,6 +39,13 @@ improve_max_issues = 3                 # propuestas como máximo por revisión p
 proposal_label = "ai-factory-propuesta"  # etiqueta de las propuestas (NO lanza la fábrica)
 followup_issues = 2                    # tareas de seguimiento por tarea, de hallazgos fuera de alcance
 
+# Registrar el trabajo de la fábrica como tareas de un proyecto de Forja.
+# Credenciales sólo por entorno: FORJA_EMAIL y FORJA_PASSWORD (y FORJA_URL si no pones url aquí).
+[forja]
+enabled = false
+url = ""                   # p. ej. "https://sgf-app.onrender.com"
+project = "AI Factory"     # la cuenta de la fábrica debe ser miembro de este proyecto
+
 # Variables de entorno NO secretas para setup, tests y comandos de los agentes.
 [env]
 # EJEMPLO = "valor"
