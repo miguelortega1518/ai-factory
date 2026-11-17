@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import sys
 import time
 from pathlib import Path
@@ -57,6 +58,12 @@ def main(argv: list[str] | None = None) -> int:
     src.add_argument("--task", help="Descripción de la tarea en texto")
     src.add_argument("--github-issue", type=int, help="Número de issue (usa github_repo de la config)")
     src.add_argument("--sentry-json", help="Archivo JSON con un issue/webhook de Sentry")
+
+    resume = sub.add_parser("resume", help="Reanuda desde un checkpoint verificado")
+    resume.add_argument("run_id")
+    resume.add_argument("--checkpoint", type=Path)
+    resume.add_argument("--github-issue", type=int)
+    resume.add_argument("--artifact-id", type=int)
 
     i = sub.add_parser("intake", help="Procesa tareas pendientes de GitHub/Sentry")
     i.add_argument("--source", choices=["github", "sentry", "all"], default="all")
@@ -120,6 +127,26 @@ def main(argv: list[str] | None = None) -> int:
 
     factory = _factory(args)
 
+    if args.cmd == "resume":
+        task = None
+        if args.github_issue:
+            import subprocess
+            out = subprocess.run(["gh", "issue", "view", str(args.github_issue), "--repo", cfg.github_repo,
+                "--json", "number,title,body,url,labels"], capture_output=True, text=True, check=True).stdout
+            task = task_from_github_issue(json.loads(out), cfg.github_repo)
+        if args.artifact_id:
+            if args.checkpoint or not args.github_issue:
+                ap.error("--artifact-id requiere --github-issue y excluye --checkpoint")
+            import tempfile
+            from .recovery_transport import download
+            with tempfile.TemporaryDirectory() as d:
+                package = download(cfg, args.artifact_id, Path(d) / "package")
+                state = factory.resume(args.run_id, package=package, task=task)
+        else:
+            state = factory.resume(args.run_id, package=args.checkpoint, task=task)
+        print(json.dumps(summarize(state), ensure_ascii=False, indent=2))
+        return 0 if state.status in (RunStatus.SHIPPED, RunStatus.AWAITING_HUMAN) else 1
+
     if args.cmd == "run":
         if args.task:
             task = task_from_text(args.task)
@@ -147,12 +174,13 @@ def main(argv: list[str] | None = None) -> int:
             if args.source in ("sentry", "all") and cfg.sentry_org and cfg.sentry_project:
                 tasks += fetch_sentry_issues(cfg.sentry_org, cfg.sentry_project, args.limit)
             done = _processed(cfg.factory_dir)
-            pending = [t for t in tasks if t.id not in done]
+            pending = [t for t in tasks if t.id not in done and cfg.quota_label not in t.labels]
             print(f"{len(pending)} tareas nuevas")
             for t in pending:
-                factory.run(t)
-                done.add(t.id)
-                _mark_processed(cfg.factory_dir, done)
+                state = factory.run(t)
+                if state.status in (RunStatus.SHIPPED, RunStatus.AWAITING_HUMAN, RunStatus.REJECTED):
+                    done.add(t.id)
+                    _mark_processed(cfg.factory_dir, done)
             if not args.watch:
                 return 0
             time.sleep(args.watch)

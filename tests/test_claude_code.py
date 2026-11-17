@@ -68,7 +68,7 @@ def test_full_pipeline_runs_on_claude_code(repo, cfg, tmp_path):
 def test_claude_code_error_fails_run(repo, cfg, tmp_path):
     _setup(cfg, tmp_path, mode="max_turns")
     state = Factory(cfg, client=None, log=lambda *_: None).run(task_from_text("Añade add"))
-    assert state.status == RunStatus.FAILED
+    assert state.status == RunStatus.RECOVERABLE
     assert "error_max_turns" in state.error
 
 

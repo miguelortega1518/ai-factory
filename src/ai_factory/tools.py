@@ -14,7 +14,9 @@ _MAX_OUTPUT = 20000
 
 # Sin bytecode: evita .pyc obsoletos cuando un archivo se reescribe con el mismo tamaño en el mismo
 # segundo, y que __pycache__ acabe en los commits de la fábrica.
-SUBPROCESS_ENV = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+SUBPROCESS_ENV = {k: v for k, v in os.environ.items()
+                  if not k.startswith(("ACTIONS_RUNTIME_", "ACTIONS_RESULTS_", "FACTORY_CHECKPOINT_", "FACTORY_ARTIFACT_"))}
+SUBPROCESS_ENV["PYTHONDONTWRITEBYTECODE"] = "1"
 
 
 class Workspace:

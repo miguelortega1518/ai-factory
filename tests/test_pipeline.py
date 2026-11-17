@@ -95,5 +95,5 @@ def test_setup_command_and_env_reach_worktree(repo, cfg):
 def test_failing_setup_marks_run_failed(repo, cfg):
     cfg.setup_command = "exit 3"
     state = Factory(cfg, FakeClient(files=GOOD_FILES), log=lambda *_: None).run(task_from_text("Añade add"))
-    assert state.status == RunStatus.FAILED
+    assert state.status == RunStatus.RECOVERABLE
     assert "setup_command" in state.error

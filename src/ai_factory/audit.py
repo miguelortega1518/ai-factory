@@ -29,4 +29,5 @@ class AuditLog:
     def events(self) -> list[dict]:
         if not self._path.exists():
             return []
-        return [json.loads(l) for l in self._path.read_text().splitlines() if l.strip()]
+        with self._lock:
+            return [json.loads(l) for l in self._path.read_text().splitlines() if l.strip()]

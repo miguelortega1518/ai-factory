@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from ..audit import AuditLog
@@ -79,7 +79,7 @@ class Agents:
 
     # 4. Revisión paralela --------------------------------------------------------------
     def review_all(self, spec: Spec, diff: str, ws: Workspace, test_report: str = "",
-                   qa_report: QAReport | None = None, screenshots: list[Path] | None = None) -> list[Review]:
+                   qa_report: QAReport | None = None, screenshots: list[Path] | None = None, *, names=None, cached=None, on_complete=None) -> list[Review]:
         screenshots = screenshots or []
         context = (
             f"# Verificación ejecutada por la fábrica sobre este diff: PASÓ\n"
@@ -112,8 +112,27 @@ class Agents:
             review = self._agent(agent_name, prompts.REVIEWERS[name], tools, ws, add_dirs=add_dirs).run(prompt, Review)
             return review.model_copy(update={"reviewer": name, "model": self.cfg.agent(agent_name).model})
 
-        with ThreadPoolExecutor(max_workers=len(REVIEWER_NAMES)) as pool:
-            return list(pool.map(one, REVIEWER_NAMES))
+        names = list(REVIEWER_NAMES if names is None else names)
+        if not set(names).issubset(REVIEWER_NAMES) or not {"security", "code"}.issubset(names):
+            raise ValueError("Selección inválida: seguridad y código son obligatorios")
+        results = {r.reviewer: r for r in (cached or []) if r.reviewer in names}
+        pending = [name for name in names if name not in results]
+        errors = []
+        if pending:
+            with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+                futures = {pool.submit(one, name): name for name in pending}
+                for future in as_completed(futures):
+                    try:
+                        review = future.result()
+                        results[review.reviewer] = review
+                        if on_complete:
+                            on_complete(review)  # caller thread: atomic state snapshots, no races
+                    except Exception as e:
+                        errors.append(e)
+            if errors:
+                from ..quota import QuotaExhausted
+                raise next((e for e in errors if isinstance(e, QuotaExhausted)), errors[0])
+        return [results[name] for name in names]
 
     # Tester funcional -----------------------------------------------------------------
     def qa(self, spec: Spec, ws: Workspace, qa_ws: Workspace, url: str, env: dict[str, str]) -> QAReport:
@@ -135,7 +154,7 @@ class Agents:
 
     # 5. Aprobador ----------------------------------------------------------------------
     def approve(self, spec: Spec, build: BuildReport, diff: str, reviews: list[Review], ws: Workspace,
-                test_report: str = "", qa_report: QAReport | None = None) -> Verdict:
+                test_report: str = "", qa_report: QAReport | None = None, *, selection=None) -> Verdict:
         agent = self._agent("approver", prompts.APPROVER, ws.read_tools(), ws)
         prompt = (
             f"# Verificación ejecutada por la fábrica (fuente de verdad sobre los tests)\n"
@@ -149,6 +168,9 @@ class Agents:
             f"# Revisiones\n```json\n[{','.join(r.model_dump_json() for r in reviews)}]\n```\n\n"
             f"# Diff\n```diff\n{diff[:150000]}\n```"
         )
+        if selection:
+            prompt += "\n\n# Selección de revisores (omitidos NO equivalen a aprobados)\n" + str(selection)
+            prompt += "\nSi hace falta UI/UX ausente, solicítala con additional_reviewers antes de aprobar."
         return agent.run(prompt, Verdict)
 
     # 6. Gate final ---------------------------------------------------------------------

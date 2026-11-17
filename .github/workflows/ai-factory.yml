@@ -15,7 +15,15 @@ on:
         description: "Número de issue (lo usa `factory retry-paused` para relanzar tras el límite de uso)"
         required: false
 
+      resume_run_id:
+        description: "Ejecución a recuperar (requiere issue y checkpoint_artifact)"
+        required: false
+      checkpoint_artifact:
+        description: "ID del artefacto de recuperación"
+        required: false
+
 permissions:
+  actions: read  # validar y descargar puntos de recuperación
   contents: write
   pull-requests: write
   issues: write   # para comentar el resultado y cerrar el issue
@@ -34,6 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -50,7 +59,11 @@ jobs:
         run: |
           git config user.name "ai-factory[bot]"
           git config user.email "ai-factory@users.noreply.github.com"
-      - name: Ejecutar
+      - name: Instalar transporte de checkpoints
+        run: npm install --prefix "$RUNNER_TEMP/factory-artifact-client" --ignore-scripts --no-audit --no-fund @actions/artifact@2.3.2
+
+      - name: Ejecutar con recuperación
+        uses: actions/github-script@v7
         env:
           # Usa uno de los dos: API key (backend "api") o token de suscripción (backend "claude-code").
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -65,17 +78,41 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           TASK_TEXT: ${{ github.event.inputs.task }}
           DISPATCH_ISSUE: ${{ github.event.inputs.issue }}
-        run: |
-          case "$EVENT_NAME" in
-            issues)            factory run --github-issue "$ISSUE_NUMBER" ;;
-            workflow_dispatch)
-              if [ -n "$DISPATCH_ISSUE" ]; then factory run --github-issue "$DISPATCH_ISSUE"
-              else factory run --task "$TASK_TEXT"; fi ;;
-            schedule)          factory intake --limit 3 ;;
-          esac
+          RESUME_RUN_ID: ${{ github.event.inputs.resume_run_id }}
+          CHECKPOINT_ARTIFACT: ${{ github.event.inputs.checkpoint_artifact }}
+        with:
+          script: |
+            const {spawnSync} = require('node:child_process');
+            const path = require('node:path');
+            const locate = spawnSync('python', ['-c', 'import ai_factory, pathlib; print(pathlib.Path(ai_factory.__file__).parent / "upload-checkpoint.cjs")'], {encoding:'utf8'});
+            if (locate.status !== 0) throw new Error('No se encontró AI Factory');
+            const uploader = locate.stdout.trim();
+            const env = {...process.env,
+              FACTORY_CHECKPOINT_UPLOADER: `node "${uploader}"`,
+              FACTORY_ARTIFACT_MODULE: path.join(process.env.RUNNER_TEMP, 'factory-artifact-client/node_modules/@actions/artifact')};
+            const issue = env.ISSUE_NUMBER || env.DISPATCH_ISSUE;
+            let args;
+            if (env.RESUME_RUN_ID || env.CHECKPOINT_ARTIFACT) {
+              if (!issue || !/^[0-9]+$/.test(env.CHECKPOINT_ARTIFACT || '') || !/^[\w-]+$/.test(env.RESUME_RUN_ID || '')) {
+                throw new Error('La recuperación requiere issue, resume_run_id y checkpoint_artifact válidos');
+              }
+              args = ['resume', env.RESUME_RUN_ID, '--artifact-id', env.CHECKPOINT_ARTIFACT, '--github-issue', issue];
+            } else if (issue) {
+              args = ['run', '--github-issue', issue];
+            } else if (env.EVENT_NAME === 'schedule') {
+              args = ['intake', '--limit', '3'];
+            } else {
+              args = ['run', '--task', env.TASK_TEXT || ''];
+            }
+            // argv, never shell interpolation of issue/task inputs. Runtime artifact credentials
+            // are available here and stripped from subprocesses used by agents/tests.
+            const result = spawnSync('factory', args, {env, stdio:'inherit'});
+            if (result.error) throw result.error;
+            if (result.status !== 0) core.setFailed(`AI Factory terminó con código ${result.status}`);
+
       - name: Guardar auditoría
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ai-factory-runs
+          name: ai-factory-${{ github.run_id }}
           path: .factory/runs/

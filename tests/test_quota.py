@@ -65,7 +65,7 @@ def test_quota_pauses_the_run_and_labels_the_issue(repo, cfg, tmp_path):
     cfg.github_repo = "o/r"
     gh = GhRecorder()
     state = Factory(cfg, client=None, log=lambda *_: None, runner=gh).run(task_from_github_issue(ISSUE, "o/r"))
-    assert state.status == RunStatus.FAILED
+    assert state.status == RunStatus.PAUSED
     assert state.retry_at and datetime.fromisoformat(state.retry_at) > datetime.now(UTC)
     [comment] = gh.comments()
     assert "En espera por el límite de uso" in comment and "relanzará sola" in comment
@@ -131,3 +131,33 @@ def test_retry_paused_dry_run_writes_nothing(cfg):
     gh = FakeGh({1: [_comment(at(9).isoformat())]})
     [r] = retry_paused(cfg, now=at(10), dry_run=True, run=gh, log=lambda *_: None)
     assert r["action"] == "relaunch" and gh.writes == []
+
+
+def test_dispatch_carries_checkpoint_and_keeps_label_when_dispatch_fails(cfg):
+    cfg.github_repo = 'o/r'
+    data = {'status': 'paused', 'retry_at': at(9).isoformat(), 'run_id': 'run-1', 'checkpoint_artifact_id': 123}
+    gh = FakeGh({1: [{'body': '<!-- ai-factory:' + json.dumps(data) + ' -->'}]})
+    retry_paused(cfg, now=at(10), run=gh, log=lambda *_: None)
+    writes = gh.writes
+    dispatch_index = next(i for i, (a, p) in enumerate(writes) if '/dispatches' in ' '.join(a))
+    delete_index = next(i for i, (a, p) in enumerate(writes) if 'DELETE' in a)
+    assert dispatch_index < delete_index
+    assert writes[dispatch_index][1]['inputs'] == {'issue': '1', 'resume_run_id': 'run-1', 'checkpoint_artifact': '123'}
+
+    gh = FakeGh({1: [{'body': '<!-- ai-factory:' + json.dumps(data) + ' -->'}]})
+    def fail(args, **kwargs):
+        if '/dispatches' in ' '.join(args):
+            return subprocess.CompletedProcess(args, 1, '', 'unavailable')
+        return gh(args, **kwargs)
+    with pytest.raises(RuntimeError):
+        retry_paused(cfg, now=at(10), run=fail, log=lambda *_: None)
+    assert not any('DELETE' in a for a, _ in gh.writes)
+
+
+def test_monthly_limit_is_not_retried_hourly(cfg):
+    cfg.github_repo = 'o/r'
+    data = {'status':'paused', 'retry_at':at(9).isoformat(), 'error':'monthly spend limit; 5-hour limit resets 9am'}
+    gh = FakeGh({1:[{'body':'<!-- ai-factory:' + json.dumps(data) + ' -->'}]})
+    result = retry_paused(cfg, now=at(10), run=gh, log=lambda *_: None)
+    assert result[0]['action'] == 'give_up'
+    assert not any('/dispatches' in ' '.join(a) for a, _ in gh.writes)

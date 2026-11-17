@@ -85,6 +85,8 @@ class FactoryConfig:
         default_factory=lambda: ["pytest", "python", "npm", "npx", "node", "ruff", "ls", "cat", "git"]
     )
     max_iterations: int = 3
+    recovery_enabled: bool = True
+    review_mode: str = "all"  # all | observe | selective
     max_agent_turns: int = 60
     # Rutas que los agentes nunca pueden cambiar: si el Builder las toca, la fábrica lo deshace. Por defecto
     # los workflows de GitHub Actions: se ejecutan con los secretos del repo antes de que nadie los revise,
@@ -179,4 +181,6 @@ def load_config(repo_path: str | Path = ".", config_file: str | Path | None = No
     cfg = FactoryConfig(repo_path=repo, agents=agents, qa=qa, forja=forja, **data)
     if cfg.backend not in ("api", "claude-code"):
         raise ValueError(f"backend debe ser 'api' o 'claude-code', no {cfg.backend!r}")
+    if cfg.review_mode not in ("all", "observe", "selective"):
+        raise ValueError("review_mode debe ser all, observe o selective")
     return cfg

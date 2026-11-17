@@ -53,6 +53,14 @@ def summary(state: RunState) -> dict:
         "risk": state.gate.risk if state.gate else None,
         "error": state.error[:300],
         "retry_at": state.retry_at or None,
+        "attempt": state.attempt,
+        "cost_usd_equivalent": sum(state.usage_by_agent.values()),
+        "usage_by_agent": state.usage_by_agent,
+        "usage_calls": state.usage_calls,
+        "next_stage": state.next_stage,
+        "checkpoint_artifact_id": state.checkpoint_artifact_id,
+        "review_selection": state.review_selection,
+        "reused_stages": state.reused_stages,
         "stages": state.stages,
         "seconds": round((state.finished_at or 0) - state.started_at, 1) if state.finished_at else None,
         "reviews": [{"reviewer": r.reviewer, "model": r.model, "passed": r.passed} for r in state.reviews],
@@ -157,7 +165,7 @@ def build_comment(state: RunState, cfg: FactoryConfig) -> tuple[str, bool] | Non
         )
         return body + _footer(state), False
 
-    if state.status == RunStatus.FAILED and state.retry_at:
+    if state.status in (RunStatus.FAILED, RunStatus.PAUSED) and state.retry_at:
         from datetime import datetime
 
         from .quota import fmt
@@ -165,16 +173,17 @@ def build_comment(state: RunState, cfg: FactoryConfig) -> tuple[str, bool] | Non
         when = fmt(datetime.fromisoformat(state.retry_at))
         body = (
             f"⏸ **En espera por el límite de uso de la suscripción.** La tarea se detuvo sin terminar y no se "
-            f"cambió nada en la rama principal. La fábrica la relanzará sola a partir de las **{when}** "
+            f"cambió nada en la rama principal. La fábrica la relanzará sola a partir de las **{when}** si el límite es temporal "
             f"(como mucho {cfg.quota_max_retries} reintentos seguidos). Mientras tanto lleva la etiqueta "
             f"`{cfg.quota_label}`.\n\n```\n{state.error[:800]}\n```"
         )
         return body + _footer(state), False
 
-    if state.status == RunStatus.FAILED:
+    if state.status in (RunStatus.FAILED, RunStatus.RECOVERABLE):
         body = (
             f"❌ **La ejecución de la AI Factory falló** antes de terminar:\n\n```\n{state.error[:1500]}\n```\n\n"
-            "No se ha cambiado nada en la rama principal. El issue sigue abierto."
+            "El issue sigue abierto. Revisa commit/PR y la auditoría antes de repetir una publicación.\n"
+            + (f"Punto de recuperación: `{state.run_id}`, etapa `{state.next_stage}`." if state.checkpoint else "")
         )
         return body + _footer(state), False
 
@@ -195,7 +204,7 @@ def report(state: RunState, cfg: FactoryConfig, audit: AuditLog, run: Runner = s
         if close:
             _gh(run, ["api", "-X", "PATCH", f"repos/{repo}/issues/{number}", "--input", "-"],
                 {"state": "closed", "state_reason": "completed"})
-        if state.status == RunStatus.FAILED and state.retry_at:
+        if state.status in (RunStatus.FAILED, RunStatus.PAUSED) and state.retry_at:
             _gh(run, ["api", "-X", "POST", f"repos/{repo}/issues/{number}/labels", "--input", "-"],
                 {"labels": [cfg.quota_label]})
         audit.event("factory", "issue_feedback", issue=f"{repo}#{number}", closed=close)

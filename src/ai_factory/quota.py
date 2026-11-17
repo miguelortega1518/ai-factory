@@ -155,6 +155,8 @@ def retry_paused(cfg: FactoryConfig, *, now: datetime | None = None, dry_run: bo
         if not retry_at:
             # Ya no está en espera (otra ejecución terminó): sólo se quita la etiqueta.
             entry["action"] = "clear"
+        elif "monthly" in str(last.get("error", "")).lower() or "weekly" in str(last.get("error", "")).lower():
+            entry["action"] = "give_up"
         elif attempts > cfg.quota_max_retries:
             entry["action"] = "give_up"
         elif datetime.fromisoformat(retry_at) <= now:
@@ -165,19 +167,35 @@ def retry_paused(cfg: FactoryConfig, *, now: datetime | None = None, dry_run: bo
             f"desde {retry_at or '—'})")
         if dry_run or entry["action"] == "wait":
             continue
-        _gh(run, ["api", "-X", "DELETE", f"repos/{repo}/issues/{number}/labels/{label}"])
         if entry["action"] == "relaunch":
+            inputs = {"issue": str(number)}
+            if last.get("checkpoint_artifact_id") and last.get("run_id"):
+                inputs.update(resume_run_id=last["run_id"], checkpoint_artifact=str(last["checkpoint_artifact_id"]))
+            elif last.get("status") == "paused":
+                # A new-format paused task must never silently restart from scratch.
+                entry["action"] = "missing_checkpoint"
+                continue
             _gh(run, ["api", "-X", "POST", f"repos/{repo}/actions/workflows/{cfg.quota_workflow}/dispatches",
-                      "--input", "-"], {"ref": cfg.base_branch, "inputs": {"issue": str(number)}})
+                      "--input", "-"], {"ref": cfg.base_branch, "inputs": inputs})
+            _gh(run, ["api", "-X", "DELETE", f"repos/{repo}/issues/{number}/labels/{label}"])
             _gh(run, ["api", "-X", "POST", f"repos/{repo}/issues/{number}/comments", "--input", "-"],
-                {"body": f"▶ **AI Factory:** el límite de uso ya se restableció; relanzo la tarea "
+                {"body": f"▶ **AI Factory:** llegó la hora prevista; relanzo la tarea desde el avance disponible "
                          f"(reintento {attempts} de {cfg.quota_max_retries})."})
         elif entry["action"] == "give_up":
+            # Prevent scheduled intake from restarting a permanently blocked task.
+            active_labels = [x.get("name", "") if isinstance(x, dict) else x for x in issue.get("labels", [])]
+            if cfg.github_label in active_labels:
+                _gh(run, ["api", "-X", "DELETE", f"repos/{repo}/issues/{number}/labels/{cfg.github_label}"])
+            _gh(run, ["api", "-X", "DELETE", f"repos/{repo}/issues/{number}/labels/{label}"])
             _gh(run, ["api", "-X", "POST", f"repos/{repo}/issues/{number}/comments", "--input", "-"],
                 {"body": f"⛔ **AI Factory:** la tarea chocó con el límite de uso {attempts} veces seguidas y no "
                          "la relanzo más. Puede ser el límite mensual de la organización "
-                         "(https://claude.ai/admin-settings/usage). Cuando haya cuota, quita y vuelve a "
-                         f"poner la etiqueta `{cfg.github_label}`."})
+                         "(https://claude.ai/admin-settings/usage). Cuando haya cuota, usa Run workflow con "
+                         f"issue={number}, resume_run_id={last.get('run_id', '')} y "
+                         f"checkpoint_artifact={last.get('checkpoint_artifact_id', '')}; "
+                         "si es una ejecución antigua sin checkpoint, inicia una tarea nueva."})
+        elif entry["action"] == "clear":
+            _gh(run, ["api", "-X", "DELETE", f"repos/{repo}/issues/{number}/labels/{label}"])
     return results
 
 
