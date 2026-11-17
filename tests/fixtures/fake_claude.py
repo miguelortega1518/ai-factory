@@ -39,7 +39,12 @@ if role == "builder":
     Path("tests/test_calc.py").write_text("from calc import add\n\ndef test_add():\n    assert add(2, 3) == 5\n")
 
 print(json.dumps({"type": "system", "subtype": "init", "model": opt("--model")}))
-if mode == "max_turns" and role == "spec_writer":
+if mode == "quota" and role == "builder":
+    # Así responde el CLI real cuando se agota la cuota: subtype success, is_error y sin structured_output.
+    print(json.dumps({"type": "result", "subtype": "success", "is_error": True,
+                      "result": "You've hit your org's monthly spend limit · ask your admin to raise it at "
+                                "https://claude.ai/admin-settings/usage · your 5-hour limit resets 7:50am (UTC)"}))
+elif mode == "max_turns" and role == "spec_writer":
     print(json.dumps({"type": "result", "subtype": "error_max_turns", "is_error": True, "result": "sin turnos"}))
 else:
     print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "num_turns": 3,

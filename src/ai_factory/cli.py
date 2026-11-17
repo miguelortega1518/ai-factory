@@ -67,6 +67,10 @@ def main(argv: list[str] | None = None) -> int:
     im.add_argument("--max", type=int, default=None, help="Propuestas como máximo (por defecto improve_max_issues)")
     im.add_argument("--dry-run", action="store_true", help="Sólo muestra las propuestas, no crea issues")
 
+    rp = sub.add_parser("retry-paused",
+                        help="Relanza los issues en espera por el límite de uso cuando ya se restableció")
+    rp.add_argument("--dry-run", action="store_true", help="Sólo muestra qué haría")
+
     sub.add_parser("status", help="Lista las ejecuciones")
     a = sub.add_parser("approve", help="Aprobación humana de un cambio crítico")
     a.add_argument("run_id")
@@ -100,6 +104,13 @@ def main(argv: list[str] | None = None) -> int:
             print(brain.search(args.query))
         else:
             print(brain.add(args.category, args.title, args.body))
+        return 0
+
+    if args.cmd == "retry-paused":
+        from .quota import retry_paused
+
+        results = retry_paused(cfg, dry_run=args.dry_run)
+        print(f"{len(results)} issue(s) en espera revisados")
         return 0
 
     if args.cmd == "status":

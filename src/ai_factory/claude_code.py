@@ -20,6 +20,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from . import quota
 from .audit import AuditLog
 from .config import AgentConfig
 from .llm import AgentError
@@ -128,6 +129,7 @@ class ClaudeCodeAgent:
         transcript = self.audit.artifact(f"{self.name}-{n}.jsonl", proc.stdout)
         result = _result_event(proc.stdout)
         if result is None:
+            quota.check(self.name, (proc.stderr or "") + "\n" + (proc.stdout or "")[-3000:])
             raise AgentError(f"{self.name}: Claude Code terminó sin resultado (exit {proc.returncode}): "
                              f"{(proc.stderr or proc.stdout)[-1500:]}")
         self.audit.event(
@@ -138,6 +140,8 @@ class ClaudeCodeAgent:
         )
         structured = result.get("structured_output")
         if result.get("is_error") or structured is None:
+            if result.get("is_error"):
+                quota.check(self.name, str(result.get("result")))
             raise AgentError(f"{self.name}: Claude Code no entregó un resultado válido "
                              f"({result.get('subtype')}): {str(result.get('result'))[:1500]}")
         try:

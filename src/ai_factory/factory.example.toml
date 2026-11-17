@@ -39,6 +39,11 @@ improve_max_issues = 3                 # propuestas como máximo por revisión p
 proposal_label = "ai-factory-propuesta"  # etiqueta de las propuestas (NO lanza la fábrica)
 followup_issues = 2                    # tareas de seguimiento por tarea, de hallazgos fuera de alcance
 
+# Límite de uso de la suscripción: la tarea queda en espera y `factory retry-paused` la relanza.
+quota_label = "ai-factory-en-espera"
+quota_max_retries = 4
+quota_workflow = "ai-factory.yml"   # workflow que se relanza con workflow_dispatch (input `issue`)
+
 # Registrar el trabajo de la fábrica como tareas de un proyecto de Forja.
 # Credenciales sólo por entorno: FORJA_EMAIL y FORJA_PASSWORD (y FORJA_URL si no pones url aquí).
 [forja]

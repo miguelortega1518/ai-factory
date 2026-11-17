@@ -66,6 +66,14 @@ Bloqueada si se rechaza (área «qa») o falla. Si relanzas un issue, reutiliza 
 credenciales van sólo por entorno (`FORJA_EMAIL`, `FORJA_PASSWORD` y opcionalmente `FORJA_URL`), y
 un fallo de Forja nunca rompe una ejecución: queda en la auditoría.
 
+**Límite de uso de la suscripción:** con el motor `claude-code`, si un agente choca con el límite de
+uso, la tarea no se da por fallida. La fábrica detecta la hora a la que se restablece la cuota (p. ej.
+«resets 7:50am (UTC)»), comenta en el issue que queda **en espera** y le pone la etiqueta
+`ai-factory-en-espera`. El comando `factory retry-paused`, que corre cada hora en el workflow
+`ai-factory-retry.yml`, relanza esos issues con `workflow_dispatch` a partir de esa hora. Se rinde tras
+`quota_max_retries` (4) pausas seguidas, que suele indicar el límite mensual de la organización. La
+tarea empieza de nuevo desde la spec. Claves: `quota_label`, `quota_max_retries` y `quota_workflow`.
+
 **Brain:** notas Markdown en `.factory/brain/` (arquitectura, decisiones, convenciones,
 lecciones). Están versionadas en git, así que la memoria también es auditable. El Gatekeeper
 añade lecciones nuevas en cada ejecución y viajan en el mismo commit que el cambio.
