@@ -208,6 +208,8 @@ class RunState(BaseModel):
     # Ejecución de GitHub Actions que lanzó esta tarea, si la hay.
     actions_run_id: str = Field(default_factory=lambda: os.environ.get("GITHUB_RUN_ID", ""))
     error: str = ""
+    # Si falló por el límite de uso: hora (ISO, UTC) a partir de la que se puede relanzar.
+    retry_at: str = ""
     started_at: float = Field(default_factory=time.time)
     finished_at: float | None = None
 

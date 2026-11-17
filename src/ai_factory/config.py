@@ -111,6 +111,11 @@ class FactoryConfig:
     improve_max_issues: int = 3  # propuestas como máximo por revisión periódica
     proposal_label: str = "ai-factory-propuesta"  # etiqueta de las propuestas (NO lanza la fábrica)
     followup_issues: int = 2  # tareas de seguimiento por tarea, de hallazgos fuera de alcance (0 = ninguna)
+    # Límite de uso de la suscripción: la tarea queda en espera con esta etiqueta y `factory retry-paused`
+    # la relanza (workflow_dispatch de quota_workflow) cuando se restablece, hasta quota_max_retries veces.
+    quota_label: str = "ai-factory-en-espera"
+    quota_max_retries: int = 4
+    quota_workflow: str = "ai-factory.yml"
     sentry_org: str = ""
     sentry_project: str = ""
 

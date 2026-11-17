@@ -10,7 +10,10 @@ on:
     inputs:
       task:
         description: "Tarea en texto libre"
-        required: true
+        required: false
+      issue:
+        description: "Número de issue (lo usa `factory retry-paused` para relanzar tras el límite de uso)"
+        required: false
 
 permissions:
   contents: write
@@ -20,7 +23,7 @@ permissions:
 # Una ejecución por issue: varias tareas avanzan en paralelo sin cancelarse entre sí.
 # Si dos fusionan a la vez, la fábrica incorpora la otra, vuelve a verificar y reintenta.
 concurrency:
-  group: ai-factory-${{ github.event.issue.number || github.run_id }}
+  group: ai-factory-${{ github.event.issue.number || github.event.inputs.issue || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -61,10 +64,13 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           TASK_TEXT: ${{ github.event.inputs.task }}
+          DISPATCH_ISSUE: ${{ github.event.inputs.issue }}
         run: |
           case "$EVENT_NAME" in
             issues)            factory run --github-issue "$ISSUE_NUMBER" ;;
-            workflow_dispatch) factory run --task "$TASK_TEXT" ;;
+            workflow_dispatch)
+              if [ -n "$DISPATCH_ISSUE" ]; then factory run --github-issue "$DISPATCH_ISSUE"
+              else factory run --task "$TASK_TEXT"; fi ;;
             schedule)          factory intake --limit 3 ;;
           esac
       - name: Guardar auditoría

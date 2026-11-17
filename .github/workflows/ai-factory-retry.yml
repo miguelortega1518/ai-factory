@@ -1,0 +1,33 @@
+# Copia este workflow junto a ai-factory.yml. Cada hora relanza los issues que la fábrica dejó
+# «en espera» por el límite de uso de la suscripción (etiqueta ai-factory-en-espera), cuando la
+# cuota ya se restableció. No usa la suscripción: sólo consulta GitHub y lanza ai-factory.yml con
+# workflow_dispatch, que GITHUB_TOKEN sí puede disparar.
+name: AI Factory · reintentos por límite de uso
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write   # workflow_dispatch de ai-factory.yml
+  issues: write    # quitar la etiqueta de espera y comentar
+
+concurrency:
+  group: ai-factory-retry
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "ai-factory @ git+https://github.com/${{ vars.AI_FACTORY_REPO || 'OWNER/ai-factory' }}"
+      - name: Relanzar las tareas en espera
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: factory retry-paused

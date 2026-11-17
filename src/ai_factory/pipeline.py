@@ -11,13 +11,14 @@ from pathlib import Path
 
 import shutil
 
-from . import git_ops, issue_feedback, qa
+from . import git_ops, issue_feedback, qa, quota
 from .forja import ForjaTracker, summary_text
 from .agents import Agents
 from .audit import AuditLog
 from .brain import Brain
 from .config import FactoryConfig
 from .llm import AgentError, LLMClient
+from .quota import QuotaExhausted
 from .models import IterationRecord, QAReport, RunState, RunStatus, Task, Verdict
 from .tools import SUBPROCESS_ENV, Workspace
 
@@ -218,6 +219,13 @@ class Factory:
                 self._request_human(state, wt, audit)
             return self._finish(state, audit)
 
+        except QuotaExhausted as e:  # no es un fallo de la tarea: queda en espera hasta que haya cuota
+            state.status = RunStatus.FAILED
+            state.error = f"{type(e).__name__}: {e}"
+            state.retry_at = e.retry_at.isoformat()
+            audit.event("factory", "quota", error=state.error, retry_at=state.retry_at)
+            self.log(f"  ⏸ Límite de uso de la suscripción. Se reintentará a partir de las {quota.fmt(e.retry_at)}.")
+            return self._finish(state, audit)
         except Exception as e:  # noqa: BLE001 — cualquier fallo queda registrado y auditable
             state.status = RunStatus.FAILED
             state.error = f"{type(e).__name__}: {e}"
