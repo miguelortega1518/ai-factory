@@ -68,7 +68,7 @@ def test_broken_qa_infrastructure_stops_the_task(repo, cfg, tmp_path):
     _qa(cfg, tmp_path)
     cfg.qa.setup_command = "exit 9"
     state = Factory(cfg, FakeClient(files=GOOD_FILES), log=lambda *_: None).run(task_from_text("Añade add"))
-    assert state.status == RunStatus.FAILED and "qa.setup_command" in state.error
+    assert state.status == RunStatus.RECOVERABLE and "qa.setup_command" in state.error
     assert not (repo / "calc.py").exists()
 
 
@@ -118,7 +118,7 @@ def test_occupied_port_stops_the_task(repo, cfg, tmp_path):
                 time.sleep(0.1)
         _qa(cfg, tmp_path, port=38127)
         state = Factory(cfg, FakeClient(files=GOOD_FILES), log=lambda *_: None).run(task_from_text("Añade add"))
-        assert state.status == RunStatus.FAILED and "ya está ocupado" in state.error
+        assert state.status == RunStatus.RECOVERABLE and "ya está ocupado" in state.error
     finally:
         other.terminate()
 

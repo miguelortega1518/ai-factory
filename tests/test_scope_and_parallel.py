@@ -84,9 +84,12 @@ def test_push_race_is_retried(repo, cfg, tmp_path, monkeypatch):
 
     monkeypatch.setattr(git_ops, "push", racing_push)
     logs = []
-    state = Factory(cfg, FakeClient(files=GOOD_FILES), log=logs.append).run(task_from_text("Añade add"))
+    client = FakeClient(files=GOOD_FILES)
+    state = Factory(cfg, client, log=logs.append).run(task_from_text("Añade add"))
     assert state.status == RunStatus.SHIPPED, state.error
-    assert any("reintento 2/3" in line for line in logs)
+    assert state.publication_revalidations == 1
+    assert client.calls.count("reviewer_security") == 2
+    assert client.calls.count("reviewer_code") == 2
     files = git(repo, "ls-tree", "-r", "--name-only", "origin/main").split()
     assert "paralela.py" in files and "calc.py" in files
     assert git(repo, "rev-parse", "main") == git(repo, "rev-parse", "origin/main") == state.commit

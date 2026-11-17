@@ -71,8 +71,9 @@ uso, la tarea no se da por fallida. La fábrica detecta la hora a la que se rest
 «resets 7:50am (UTC)»), comenta en el issue que queda **en espera** y le pone la etiqueta
 `ai-factory-en-espera`. El comando `factory retry-paused`, que corre cada hora en el workflow
 `ai-factory-retry.yml`, relanza esos issues con `workflow_dispatch` a partir de esa hora. Se rinde tras
-`quota_max_retries` (4) pausas seguidas, que suele indicar el límite mensual de la organización. La
-tarea empieza de nuevo desde la spec. Claves: `quota_label`, `quota_max_retries` y `quota_workflow`.
+`quota_max_retries` (4) pausas seguidas, que suele indicar el límite mensual de la organización. Con los workflows de recuperación actualizados, la
+tarea se reanuda desde el último checkpoint válido. Las ejecuciones antiguas sin checkpoint
+conservan el comportamiento anterior. Claves: `quota_label`, `quota_max_retries` y `quota_workflow`.
 
 **Brain:** notas Markdown en `.factory/brain/` (arquitectura, decisiones, convenciones,
 lecciones). Están versionadas en git, así que la memoria también es auditable. El Gatekeeper
@@ -189,3 +190,14 @@ Los tests usan un cliente LLM simulado y repositorios git temporales. Prueban el
 completo: el despliegue de bajo riesgo, el bucle de rechazo del Aprobador, el reintento con tests
 en rojo, la rendición tras `max_iterations`, el gate humano por `core_paths` y el
 aprobado/rechazado manual.
+
+## Recuperación del avance y revisiones por impacto
+
+La fábrica conserva checkpoints portables por etapa y por revisor, y puede continuar
+con `factory resume <run_id>` sin volver a generar resultados válidos. Las nuevas pausas
+usan `paused` y los errores recuperables `recoverable`. `review_mode = "observe"` permite
+medir la selección antes de activar `selective`; seguridad y código siguen siendo
+obligatorios. Los paquetes se validan y las pruebas se repiten en un runner nuevo.
+
+Consulta [RECOVERY.md](docs/RECOVERY.md) para configurar los workflows, reanudar desde
+artefactos, interpretar métricas, conocer límites y activar el piloto de forma gradual.

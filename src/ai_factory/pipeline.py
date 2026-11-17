@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
+import re
+import uuid
 import subprocess
 import time
 from contextlib import contextmanager
@@ -11,7 +14,8 @@ from pathlib import Path
 
 import shutil
 
-from . import git_ops, issue_feedback, qa, quota
+from . import checkpoints, git_ops, issue_feedback, qa, quota
+from .review_policy import select_reviewers, active_reviewers
 from .forja import ForjaTracker, summary_text
 from .agents import Agents
 from .audit import AuditLog
@@ -23,6 +27,11 @@ from .models import IterationRecord, QAReport, RunState, RunStatus, Task, Verdic
 from .tools import SUBPROCESS_ENV, Workspace
 
 HUMAN_LABEL = "needs-human-approval"
+
+
+class RevalidationRequired(RuntimeError):
+    """A definitely rejected publication can be retried after new reviews."""
+
 
 
 def _log(msg: str) -> None:
@@ -41,7 +50,7 @@ class Factory:
         Brain(self.cfg.brain_dir).init()
         gi = self.cfg.factory_dir / ".gitignore"
         if not gi.exists():
-            gi.write_text("runs/\nprocessed.json\n")
+            gi.write_text("runs/\nlocks/\nprocessed.json\n")
         toml = self.cfg.repo_path / "factory.toml"
         if not toml.exists():
             example = Path(__file__).with_name("factory.example.toml")
@@ -53,10 +62,11 @@ class Factory:
     def _run_qa(self, agents: Agents, state: RunState, wt: Path, ws: Workspace,
                 audit: AuditLog) -> tuple[QAReport, list[Path]]:
         qa_dir = self._qa_dir(state)
-        first = not qa_dir.exists()
+        first = not (qa_dir / "database-ready").exists()
         (qa_dir / "screenshots").mkdir(parents=True, exist_ok=True)
         if first:
             qa.setup_database(self.cfg, wt, audit)  # QAEnvironmentError: infraestructura, detiene la tarea
+            (qa_dir / "database-ready").touch()
         env = qa.qa_env(self.cfg)
         qa_ws = Workspace(qa_dir, ["node", "ls", "cat"], env=env)
         try:
@@ -95,159 +105,314 @@ class Factory:
 
     # ---------------------------------------------------------------------------------
     def run(self, task: Task) -> RunState:
-        run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{task.id}"
+        if self.cfg.quota_label in task.labels:
+            raise ValueError("Tarea en espera: usa resume con su checkpoint; no se reinicia desde cero")
+        run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{task.id}-{uuid.uuid4().hex[:6]}"
         state = RunState(run_id=run_id, task=task, branch=f"factory/{run_id}")
-        audit = AuditLog(self.cfg.runs_dir / run_id)
-        audit.event("factory", "task", task=task.model_dump(mode="json"))
+        with checkpoints.task_lock(self.cfg, task.id):
+            return self._execute(state)
+
+    def resume(self, run_id: str, *, package: Path | None = None, task: Task | None = None) -> RunState:
+        if not re.fullmatch(r"[\w-]+", run_id):
+            raise ValueError("Identificador inválido")
+        local_state = self.cfg.runs_dir / run_id / "state.json"
+        if local_state.exists():
+            previous = self.load(run_id)
+            if previous.status in (RunStatus.SHIPPED, RunStatus.AWAITING_HUMAN, RunStatus.REJECTED):
+                raise ValueError("La ejecución ya terminó; no se reproducen checkpoints anteriores")
+        if package is None:
+            old = self.load(run_id)
+            root = self.cfg.runs_dir / old.run_id / "checkpoints"
+            generation = json.loads((root / "latest.json").read_text())["generation"]
+            if not re.fullmatch(r"[a-f0-9]{32}", generation):
+                raise ValueError("Generación inválida")
+            package = root / generation
+        _, state = checkpoints.inspect(package, self.cfg)
+        if state.run_id != run_id:
+            raise ValueError("El checkpoint pertenece a otra ejecución")
+        if state.next_stage == "done" or state.status in (RunStatus.SHIPPED, RunStatus.AWAITING_HUMAN, RunStatus.REJECTED):
+            raise ValueError("La ejecución terminó; no se reanuda")
+        # Publication/deployment may have succeeded just before a crash. Never blindly repeat it.
+        if state.publication_started:
+            raise ValueError("Publicación iniciada: concilia commit/PR/despliegue antes de reanudar; no se repetirá automáticamente")
+        if task is not None and task.id != state.task.id:
+            raise ValueError("El issue no coincide con la tarea guardada")
+        with checkpoints.task_lock(self.cfg, state.task.id):
+            state.task = task or state.task
+            state.source_actions_run_id = state.actions_run_id
+            state.actions_run_id = os.environ.get("GITHUB_RUN_ID", "")
+            state.attempt += 1
+            state.status = RunStatus.RUNNING
+            state.error = state.retry_at = ""
+            state.finished_at = None
+            return self._execute(state, package=package)
+
+    def _checkpoint(self, state: RunState, wt: Path, audit: AuditLog) -> None:
+        responses = [e for e in audit.events() if e.get("kind") == "response"]
+        for event in responses[getattr(self, "_usage_seen", 0):]:
+            cost = event.get("cost_usd_equivalent")
+            if cost is not None:
+                role = event["agent"]
+                state.usage_by_agent[role] = state.usage_by_agent.get(role, 0.0) + float(cost)
+                state.usage_calls += 1
+        self._usage_seen = len(responses)
         self._save(state)
-        self.log(f"▶ [{run_id}] {task.title}")
+        if not self.cfg.recovery_enabled:
+            return
+        package = checkpoints.save(self.cfg, state, wt, self._qa_dir(state))
+        self._save(state)
+        audit.event("factory", "checkpoint", generation=state.checkpoint, next_stage=state.next_stage,
+                    attempt=state.attempt)
+        # Trusted operator hook, not configurable by generated project files.
+        # GitHub's wrapper uploads this immutable package and returns its artifact ID.
+        hook = os.environ.get("FACTORY_CHECKPOINT_UPLOADER")
+        if hook:
+            import shlex
+            r = subprocess.run([*shlex.split(hook), str(package)], capture_output=True, text=True, timeout=180)
+            if r.returncode:
+                raise RuntimeError(f"No se pudo persistir el checkpoint remoto: {r.stderr[-500:]}")
+            state.checkpoint_artifact_id = int(r.stdout.strip().splitlines()[-1])
+            self._save(state)
+
+    def _invalidate(self, state: RunState, *, specification: bool = False) -> None:
+        state.reviews = []
+        state.verdict = state.gate = state.qa = state.retro = None
+        state.requested_reviewers = []
+        state.review_selection = {}
+        if specification:
+            state.spec = state.build = None
+            state.next_stage = "spec"
+        else:
+            state.next_stage = "tests" if state.build else "build"
+
+    def _execute(self, state: RunState, package: Path | None = None) -> RunState:
+        self._preserve_worktree = False
+        task = state.task
+        audit = AuditLog(self.cfg.runs_dir / state.run_id)
+        self._usage_seen = len([e for e in audit.events() if e.get("kind") == "response"])
+        audit.event("factory", "resume" if package else "task", task=task.model_dump(mode="json"), attempt=state.attempt)
+        self._save(state)
         self._tracker = ForjaTracker(self.cfg, audit)
         self._tracker.start(state)
-        if self.cfg.forja.enabled:
-            self.log(f"  📋 Forja: tarea registrada en «{self.cfg.forja.project}»" if self._tracker.task_id
-                     else f"  ⚠ Forja: no se registrará esta tarea. {self._tracker.disabled_reason}")
-
-        wt: Path | None = None
+        if self.cfg.forja.enabled and not self._tracker.task_id:
+            self.log(f"  ⚠ Forja: {self._tracker.disabled_reason}")
+        wt = None
         try:
             if self.cfg.push:
                 git_ops.sync_base(self.cfg.repo_path, self.cfg.base_branch)
-            wt = git_ops.create_worktree(
-                self.cfg.repo_path, self.cfg.worktrees_dir, state.branch, self.cfg.base_branch
-            )
+            base_sha = git_ops.git(self.cfg.repo_path, "rev-parse", self.cfg.base_branch)
+            context = checkpoints.context_hash(self.cfg, task)
+            if package:
+                wt = checkpoints.restore(package, self.cfg, state)
+                old_stage = state.next_stage
+                if context != state.context_hash:
+                    self._invalidate(state, specification=True)
+                    audit.event("factory", "invalidated", reason="requirements/config/prompts changed")
+                if base_sha != state.base_sha:
+                    git_ops.merge_base_into_branch(wt, self.cfg.base_branch)
+                    self._invalidate(state, specification=True)
+                    audit.event("factory", "invalidated", reason="base changed")
+                if state.next_stage == old_stage:
+                    state.reused_stages.append(f"attempt-{state.attempt}: continue at {old_stage}")
+                    audit.event("factory", "reused", next_stage=old_stage,
+                                reviewers=[r.reviewer for r in state.reviews])
+            else:
+                wt = git_ops.create_worktree(self.cfg.repo_path, self.cfg.worktrees_dir, state.branch, self.cfg.base_branch)
+            state.base_sha, state.context_hash = base_sha, context
+            git_ops.commit_all(wt, "factory: recover partial changes")
+            if self._guard_protected(wt, audit):
+                self._invalidate(state)
             with self._stage(state, "setup"):
                 self._setup(wt, audit)
             ws = Workspace(wt, self.cfg.allowed_commands, env=self.cfg.env)
             brain = Brain(wt / ".factory" / "brain")
             agents = Agents(self.cfg, self.client, audit)
-
-            # 2. Spec ---------------------------------------------------------------------
-            self.log("  ✎ Spec Writer: consultando el Brain y redactando la especificación…")
-            with self._stage(state, "spec"):
-                state.spec = agents.write_spec(task, ws, brain)
-            audit.artifact("spec.json", state.spec.model_dump_json(indent=2))
-            self._save(state)
-
-            # 3–5. Build ↔ Review ↔ Approve ---------------------------------------------
-            feedback: list[str] | None = None
-            for i in range(1, self.cfg.max_iterations + 1):
-                state.iterations = i
-                self.log(f"  ⚒ Builder (iteración {i}): TDD en {state.branch}…")
-                self._tracker.move("en_proceso")
-                with self._stage(state, "build"):
-                    state.build = agents.build(state.spec, ws, brain, feedback)
-                git_ops.commit_all(wt, f"factory: {task.title} (iteración {i})")
-                self._guard_protected(wt, audit)
-
-                with self._stage(state, "tests"):
-                    ok, test_out = self._run_tests(wt)
-                audit.event("factory", "tests", passed=ok, output=test_out[-4000:])
+            # A new runner must verify again even when model reviews can be reused.
+            if package and state.next_stage in {"qa", "review", "approve", "gate", "retro", "publish"}:
+                ok, out = self._run_tests(wt)
+                audit.event("factory", "resume_tests", passed=ok, output=out[-4000:])
+                state.test_output = out[-4000:]
                 if not ok:
-                    self.log("  ✗ La suite de tests falla; vuelve al Builder sin pasar por revisión.")
-                    feedback = [f"La suite de tests (`{self.cfg.test_command}`) falla:\n{test_out[-3000:]}"]
-                    state.verdict = Verdict(approved=False, reasoning="Tests en rojo", required_changes=feedback)
-                    state.history.append(IterationRecord(iteration=i, tests_passed=False, required_changes=feedback))
-                    self._save(state)
-                    continue
-
-                diff = git_ops.diff_against(wt, self.cfg.base_branch)
-                if not diff.strip():
-                    raise AgentError("El Builder no produjo ningún cambio")
-                audit.artifact(f"diff-{i}.patch", diff)
-
-                # Tester funcional: la app en marcha, en un navegador real -----------------
-                qa_report: QAReport | None = None
-                screenshots: list[Path] = []
-                if qa.applies(self.cfg, git_ops.changed_files(wt, self.cfg.base_branch)):
-                    self.log("  🧪 Tester funcional: arrancando la app y probándola en el navegador…")
-                    with self._stage(state, "qa"):
-                        qa_report, screenshots = self._run_qa(agents, state, wt, ws, audit)
-                    state.qa = qa_report
-                    mark = "⚠" if qa_report.blocked else ("✓" if (qa_report.passed or not qa_report.applicable) else "✗")
-                    self.log(f"    {mark} {qa_report.summary[:110]}")
-                    if qa_report.blocked:
-                        # No es un fallo del cambio: no se devuelve al Builder; la revisión sigue y queda avisado.
-                        audit.event("qa", "blocked", summary=qa_report.summary[:1000])
-                    elif qa_report.applicable and not qa_report.passed:
-                        failed = [f"[QA] {c.criterion}: {c.evidence}" for c in qa_report.checks if c.status == "fail"]
-                        feedback = ["El tester funcional probó la app en marcha y encontró fallos: "
-                                    + qa_report.summary] + (failed or [])
-                        state.verdict = Verdict(approved=False, reasoning="QA en rojo", required_changes=feedback)
-                        state.history.append(IterationRecord(iteration=i, tests_passed=True, qa=qa_report,
-                                                             required_changes=feedback))
-                        self._save(state)
+                    self._invalidate(state)
+                    state.next_stage = "tests"
+            self._checkpoint(state, wt, audit)
+            while state.next_stage != "done":
+                stage = state.next_stage
+                self.log(f"  [{state.run_id}, intento {state.attempt}] {stage}")
+                if stage == "spec":
+                    with self._stage(state, "spec"):
+                        state.spec = agents.write_spec(task, ws, brain)
+                    audit.artifact("spec.json", state.spec.model_dump_json(indent=2))
+                    state.next_stage = "build"
+                elif stage == "build":
+                    if state.iterations >= self.cfg.max_iterations and not state.feedback[:1] == ["Continuar trabajo parcial"]:
+                        state.verdict = Verdict(approved=False, reasoning="Iteraciones agotadas", required_changes=state.feedback)
+                        state.status = RunStatus.REJECTED
+                        state.error = f"No aprobado tras {self.cfg.max_iterations} iteraciones"
+                        state.next_stage = "done"
+                        self._retro(agents, state, ws, brain, audit, apply=False)
+                        break
+                    continuing = state.feedback[:1] == ["Continuar trabajo parcial"]
+                    if not continuing:
+                        state.iterations += 1
+                    feedback = state.feedback or None
+                    state.feedback = ["Continuar trabajo parcial", *(state.feedback[1:] if continuing else state.feedback)]
+                    # Persist iteration reservation BEFORE invoking the Builder.
+                    self._checkpoint(state, wt, audit)
+                    self._tracker.move("en_proceso")
+                    with self._stage(state, "build"):
+                        state.build = agents.build(state.spec, ws, brain, feedback)
+                    state.feedback = []
+                    git_ops.commit_all(wt, f"factory: {task.title} (iteración {state.iterations})")
+                    self._guard_protected(wt, audit)
+                    self._invalidate(state)
+                    state.next_stage = "tests"
+                elif stage == "tests":
+                    with self._stage(state, "tests"):
+                        ok, out = self._run_tests(wt)
+                    state.test_output = out[-4000:]
+                    audit.event("factory", "tests", passed=ok, output=state.test_output)
+                    if not ok:
+                        self._retry_build(state, f"La suite falla: {out[-3000:]}", tests_passed=False)
+                    else:
+                        if not git_ops.diff_against(wt, self.cfg.base_branch).strip():
+                            raise AgentError("El Builder no produjo ningún cambio")
+                        state.next_stage = "qa"
+                elif stage == "qa":
+                    state.qa = None
+                    if qa.applies(self.cfg, git_ops.changed_files(wt, self.cfg.base_branch)):
+                        # Recreate QA infrastructure on a new runner even if screenshots were restored.
+                        with self._stage(state, "qa"):
+                            state.qa, _ = self._run_qa(agents, state, wt, ws, audit)
+                        if state.qa.applicable and not state.qa.passed and not state.qa.blocked:
+                            self._retry_build(state, "QA en rojo: " + state.qa.summary + "\n" + "\n".join(c.evidence for c in state.qa.checks if c.status == "fail"), tests_passed=True)
+                        else:
+                            state.next_stage = "review"
+                    else:
+                        state.next_stage = "review"
+                elif stage == "review":
+                    diff = git_ops.diff_against(wt, self.cfg.base_branch)
+                    files = git_ops.changed_files(wt, self.cfg.base_branch)
+                    state.review_selection = select_reviewers(files, state.spec, diff)
+                    names = active_reviewers(state.review_selection, self.cfg.review_mode, state.requested_reviewers)
+                    audit.event("factory", "review_selection", mode=self.cfg.review_mode,
+                                decisions=state.review_selection, active=names)
+                    audit.artifact(f"diff-{state.iterations}.patch", diff)
+                    self._tracker.move("en_revision")
+                    def completed(review):
+                        state.reviews = [r for r in state.reviews if r.reviewer != review.reviewer] + [review]
+                        self._checkpoint(state, wt, audit)
+                    shots = list((self._qa_dir(state) / "screenshots").glob("*.png"))
+                    with self._stage(state, "review"):
+                        state.reviews = agents.review_all(state.spec, diff, ws, state.test_output, state.qa, shots,
+                                                         names=names, cached=state.reviews, on_complete=completed)
+                    state.next_stage = "approve"
+                elif stage == "approve":
+                    with self._stage(state, "approve"):
+                        state.verdict = agents.approve(state.spec, state.build, git_ops.diff_against(wt, self.cfg.base_branch),
+                            state.reviews, ws, state.test_output, state.qa, selection=state.review_selection)
+                    missing = set(state.verdict.additional_reviewers) - {r.reviewer for r in state.reviews}
+                    if missing:
+                        state.requested_reviewers = sorted(set(state.requested_reviewers) | missing)
+                        state.next_stage = "review"
+                    else:
+                        state.history.append(IterationRecord(iteration=state.iterations, tests_passed=True,
+                            qa=state.qa, reviews=state.reviews, approved=state.verdict.approved,
+                            required_changes=state.verdict.required_changes))
+                        if state.verdict.approved:
+                            state.next_stage = "gate"
+                        else:
+                            state.feedback = state.verdict.required_changes or [state.verdict.reasoning]
+                            self._invalidate(state)
+                            state.next_stage = "build"
+                elif stage == "gate":
+                    files = git_ops.changed_files(wt, self.cfg.base_branch)
+                    core = [f for f in files if any(fnmatch.fnmatch(f, p) for p in self.cfg.core_paths)]
+                    with self._stage(state, "gate"):
+                        state.gate = agents.gate(task, state.spec, git_ops.diff_against(wt, self.cfg.base_branch), files, core, ws)
+                    if core:
+                        state.gate = state.gate.model_copy(update={"risk": "critical", "core_areas_touched": core})
+                    state.next_stage = "retro"
+                elif stage == "retro":
+                    # Retrospective expects the planned outcome, but it is not the persisted terminal status.
+                    state.status = RunStatus.SHIPPED if state.gate.risk == "low" else RunStatus.AWAITING_HUMAN
+                    self._retro(agents, state, ws, brain, audit, apply=True)
+                    state.status = RunStatus.RUNNING
+                    git_ops.commit_all(wt, f"factory: memoria del Brain para {task.title}")
+                    state.next_stage = "publish"
+                elif stage == "publish":
+                    if self.cfg.push:
+                        git_ops.sync_base(self.cfg.repo_path, self.cfg.base_branch)
+                    current_base = git_ops.git(self.cfg.repo_path, "rev-parse", self.cfg.base_branch)
+                    if current_base != state.base_sha:
+                        self.log("La base avanzó mientras se trabajaba: revalidando y repitiendo revisiones")
+                        git_ops.merge_base_into_branch(wt, self.cfg.base_branch)
+                        state.base_sha = current_base
+                        self._invalidate(state)
+                        ok, out = self._run_tests(wt)
+                        if not ok:
+                            raise RuntimeError(f"Tras incorporar la base, la verificación falla: {out[-1500:]}")
+                        self._checkpoint(state, wt, audit)
                         continue
-
-                self.log("  ⚖ Revisión paralela: seguridad · UX · UI · código…")
-                self._tracker.move("en_revision")
-                with self._stage(state, "review"):
-                    state.reviews = agents.review_all(state.spec, diff, ws, test_out, qa_report, screenshots)
-                for r in state.reviews:
-                    mark = "✓" if r.passed else "✗"
-                    self.log(f"    {mark} {r.reviewer} ({r.model}): {r.summary[:100]}")
-
-                self.log("  ⚑ Aprobador: analizando el feedback…")
-                with self._stage(state, "approve"):
-                    state.verdict = agents.approve(state.spec, state.build, diff, state.reviews, ws, test_out,
-                                                   qa_report)
-                state.history.append(IterationRecord(
-                    iteration=i, tests_passed=True, qa=qa_report, reviews=state.reviews, approved=state.verdict.approved,
-                    required_changes=state.verdict.required_changes,
-                ))
-                self._save(state)
-                if state.verdict.approved:
-                    self.log("  ✓ Aprobado.")
-                    break
-                feedback = state.verdict.required_changes or [state.verdict.reasoning]
-                self.log(f"  ↺ Cambios requeridos: {len(feedback)}")
-            else:
-                state.status = RunStatus.REJECTED
-                state.error = f"No aprobado tras {self.cfg.max_iterations} iteraciones"
-                self.log(f"  ✗ {state.error}. La rama {state.branch} queda para revisión manual.")
-                self._retro(agents, state, ws, brain, audit, apply=False)
-                return self._finish(state, audit)
-
-            # 6. Gate final ---------------------------------------------------------------
-            files = git_ops.changed_files(wt, self.cfg.base_branch)
-            core_hits = [f for f in files if any(fnmatch.fnmatch(f, p) for p in self.cfg.core_paths)]
-            with self._stage(state, "gate"):
-                state.gate = agents.gate(task, state.spec, diff, files, core_hits, ws)
-            if core_hits and state.gate.risk != "critical":
-                state.gate = state.gate.model_copy(
-                    update={"risk": "critical", "core_areas_touched": core_hits,
-                            "reasoning": state.gate.reasoning + " [Forzado a critical: toca core_paths]"}
-                )
-            # El resultado (fusión o aprobación humana) ya está decidido: la retrospectiva lo sabe.
-            state.status = RunStatus.SHIPPED if state.gate.risk == "low" else RunStatus.AWAITING_HUMAN
-            self._retro(agents, state, ws, brain, audit, apply=True)
-            git_ops.commit_all(wt, f"factory: memoria del Brain para {task.title}")
-            self._save(state)
-
-            if state.gate.risk == "low":
-                self.log("  🚀 Riesgo bajo: desplegando automáticamente.")
-                with self._stage(state, "ship"):
-                    self._ship(state, wt, audit)
-            else:
-                self.log("  ✋ Riesgo crítico: requiere aprobación humana.")
-                self._request_human(state, wt, audit)
+                    self._guard_protected(wt, audit)
+                    state.publication_started = True
+                    self._checkpoint(state, wt, audit)
+                    try:
+                        if state.gate.risk == "low":
+                            with self._stage(state, "ship"):
+                                self._ship(state, wt, audit)
+                        else:
+                            self._request_human(state, wt, audit)
+                    except RevalidationRequired:
+                        state.publication_revalidations += 1
+                        if state.publication_revalidations > 3:
+                            raise RuntimeError("La base sigue cambiando; checkpoint conservado para reanudación manual")
+                        git_ops.sync_base(self.cfg.repo_path, self.cfg.base_branch)
+                        git_ops.merge_base_into_branch(wt, self.cfg.base_branch)
+                        state.base_sha = git_ops.git(self.cfg.repo_path, "rev-parse", self.cfg.base_branch)
+                        self._invalidate(state)
+                        self.log("Reintento de publicación: repetir pruebas y revisiones sobre la nueva base")
+                        audit.event("factory", "publication_revalidation", attempt=state.publication_revalidations)
+                        self._checkpoint(state, wt, audit)
+                        continue
+                    state.next_stage = "done"
+                self._checkpoint(state, wt, audit)
             return self._finish(state, audit)
-
-        except QuotaExhausted as e:  # no es un fallo de la tarea: queda en espera hasta que haya cuota
-            state.status = RunStatus.FAILED
+        except QuotaExhausted as e:
+            state.status = RunStatus.PAUSED if self.cfg.recovery_enabled else RunStatus.FAILED
             state.error = f"{type(e).__name__}: {e}"
             state.retry_at = e.retry_at.isoformat()
             audit.event("factory", "quota", error=state.error, retry_at=state.retry_at)
-            self.log(f"  ⏸ Límite de uso de la suscripción. Se reintentará a partir de las {quota.fmt(e.retry_at)}.")
+            self._preserve_failure(state, wt, audit)
             return self._finish(state, audit)
-        except Exception as e:  # noqa: BLE001 — cualquier fallo queda registrado y auditable
-            state.status = RunStatus.FAILED
+        except Exception as e:
+            state.status = RunStatus.RECOVERABLE if wt is not None and self.cfg.recovery_enabled else RunStatus.FAILED
             state.error = f"{type(e).__name__}: {e}"
             audit.event("factory", "error", error=state.error)
-            self.log(f"  ✗ Error: {state.error}")
+            self._preserve_failure(state, wt, audit)
             return self._finish(state, audit)
         finally:
-            if wt is not None:
+            # If persistence failed, retain the worktree for local/manual recovery.
+            if wt is not None and not getattr(self, "_preserve_worktree", False):
                 git_ops.remove_worktree(self.cfg.repo_path, wt)
             shutil.rmtree(self._qa_dir(state), ignore_errors=True)
+
+    def _retry_build(self, state: RunState, reason: str, *, tests_passed: bool) -> None:
+        state.history.append(IterationRecord(iteration=state.iterations, tests_passed=tests_passed,
+                                            qa=state.qa, required_changes=[reason]))
+        self._invalidate(state)
+        state.feedback = [reason]
+        state.next_stage = "build"
+
+    def _preserve_failure(self, state: RunState, wt: Path | None, audit: AuditLog) -> None:
+        if wt is None:
+            return
+        try:
+            self._checkpoint(state, wt, audit)
+        except Exception as e:
+            self._preserve_worktree = True
+            audit.event("factory", "checkpoint_failed", error=str(e), worktree=str(wt))
+            state.error += f"; checkpoint no persistido: {e}; worktree conservado en {wt}"
 
     # ---------------------------------------------------------------------------------
     def approve(self, run_id: str) -> RunState:
@@ -285,6 +450,8 @@ class Factory:
         return out
 
     def load(self, run_id: str) -> RunState:
+        if not re.fullmatch(r"[\w-]+", run_id):
+            raise ValueError("Identificador de ejecución inválido")
         path = self.cfg.runs_dir / run_id / "state.json"
         if not path.exists():
             raise FileNotFoundError(f"No existe la ejecución {run_id}")
@@ -369,6 +536,11 @@ class Factory:
             for attempt in range(1, 4):
                 git_ops.sync_base(repo, base)
                 if wt is not None and git_ops.merge_base_into_branch(wt, base):
+                    if self.cfg.recovery_enabled:
+                        state.base_sha = git_ops.git(repo, "rev-parse", base)
+                        self._invalidate(state)
+                        state.publication_started = False
+                        raise RevalidationRequired("La base cambió durante publicación; revalidar")
                     self.log(f"  ↻ {base} avanzó mientras se trabajaba: se incorporó y se vuelve a verificar…")
                     with self._stage(state, "tests"):
                         ok, out = self._run_tests(wt)
@@ -390,6 +562,10 @@ class Factory:
                     git_ops.git(repo, "reset", "--hard", before)  # deshace la fusión local que no se subió
                     state.commit = ""
                     audit.event("factory", "push_retry", attempt=attempt)
+                    if self.cfg.recovery_enabled:
+                        state.publication_started = False
+                        self._invalidate(state)
+                        raise RevalidationRequired("Push rechazado por avance de base; revalidar") from e
                     self.log(f"  ↻ Otra tarea fusionó en {base} justo antes; reintento {attempt + 1}/3…")
         if self.cfg.deploy_command:
             r = subprocess.run(self.cfg.deploy_command, shell=True, cwd=repo, capture_output=True, text=True)
@@ -444,8 +620,8 @@ class Factory:
     def _save(self, state: RunState) -> None:
         d = self.cfg.runs_dir / state.run_id
         d.mkdir(parents=True, exist_ok=True)
-        (d / "state.json").write_text(state.model_dump_json(indent=2))
+        checkpoints.atomic_write(d / "state.json", state.model_dump_json(indent=2))
 
 
 def summarize(state: RunState) -> dict:
-    return json.loads(state.model_dump_json(include={"run_id", "status", "branch", "iterations", "pr_url", "error"}))
+    return json.loads(state.model_dump_json(include={"run_id", "status", "branch", "iterations", "pr_url", "error", "attempt", "next_stage", "checkpoint_artifact_id", "usage_by_agent", "usage_calls", "reused_stages"}))

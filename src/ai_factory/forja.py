@@ -206,7 +206,7 @@ class ForjaTracker:
             self.move("completada")
         elif state.status in (RunStatus.SHIPPED, RunStatus.AWAITING_HUMAN):
             self.move("en_revision")  # PR con auto-merge o esperando a una persona
-        elif state.status in (RunStatus.REJECTED, RunStatus.FAILED):
+        elif state.status in (RunStatus.REJECTED, RunStatus.FAILED, RunStatus.PAUSED, RunStatus.RECOVERABLE):
             area = "qa" if state.status == RunStatus.REJECTED else "otro"
             self.move("bloqueada", blockedByArea=area,
                       blockedByAreaText=(f"AI Factory: {state.error}"[:500] if area == "otro" else None))

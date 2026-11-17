@@ -44,8 +44,11 @@ quota_label = "ai-factory-en-espera"
 quota_max_retries = 4
 quota_workflow = "ai-factory.yml"   # workflow que se relanza con workflow_dispatch (input `issue`)
 
-# Registrar el trabajo de la fábrica como tareas de un proyecto de Forja.
-# Credenciales sólo por entorno: FORJA_EMAIL y FORJA_PASSWORD (y FORJA_URL si no pones url aquí).
+# Recuperación y piloto de selección de revisores.
+recovery_enabled = true
+review_mode = "observe"  # all | observe | selective
+
+# Registrar actividad en Forja. Credenciales sólo por entorno.
 [forja]
 enabled = false
 url = ""                   # p. ej. "https://sgf-app.onrender.com"

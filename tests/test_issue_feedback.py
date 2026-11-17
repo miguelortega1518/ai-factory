@@ -69,7 +69,7 @@ def test_rejected_and_failed_leave_issue_open(repo, cfg):
     assert "Añade test con negativos" in gh.comments()[-1]
     cfg.setup_command = "exit 7"
     _, state = _run(cfg, gh)
-    assert state.status == RunStatus.FAILED and "falló" in gh.comments()[-1]
+    assert state.status == RunStatus.RECOVERABLE and "falló" in gh.comments()[-1]
     assert not gh.closed()
 
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 import itertools
 import json
 import subprocess
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeVar
@@ -128,7 +129,7 @@ class ClaudeCodeAgent:
         except subprocess.TimeoutExpired as e:
             raise AgentError(f"{self.name}: Claude Code superó {self.timeout}s") from e
 
-        transcript = self.audit.artifact(f"{self.name}-{n}.jsonl", proc.stdout)
+        transcript = self.audit.artifact(f"{self.name}-{n}-{uuid.uuid4().hex[:8]}.jsonl", proc.stdout)
         result = _result_event(proc.stdout)
         if result is None:
             quota.check(self.name, (proc.stderr or "") + "\n" + (proc.stdout or "")[-3000:])

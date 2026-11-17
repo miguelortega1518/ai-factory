@@ -91,6 +91,7 @@ class Verdict(BaseModel):
     approved: bool
     reasoning: str
     required_changes: list[str] = Field(default_factory=list)
+    additional_reviewers: list[Literal["ux", "ui"]] = Field(default_factory=list)
 
 
 class GateDecision(BaseModel):
@@ -180,6 +181,8 @@ class ScoutReport(BaseModel):
 
 class RunStatus(str, Enum):
     RUNNING = "running"
+    PAUSED = "paused"
+    RECOVERABLE = "recoverable"
     SHIPPED = "shipped"
     AWAITING_HUMAN = "awaiting_human"
     FAILED = "failed"
@@ -212,6 +215,23 @@ class RunState(BaseModel):
     retry_at: str = ""
     started_at: float = Field(default_factory=time.time)
     finished_at: float | None = None
+    schema_version: int = 1
+    attempt: int = 1
+    next_stage: str = "spec"
+    base_sha: str = ""
+    context_hash: str = ""
+    feedback: list[str] = Field(default_factory=list)
+    review_selection: dict[str, str] = Field(default_factory=dict)
+    requested_reviewers: list[str] = Field(default_factory=list)
+    test_output: str = ""
+    checkpoint: str = ""
+    checkpoint_artifact_id: int | None = None
+    source_actions_run_id: str = ""
+    reused_stages: list[str] = Field(default_factory=list)
+    publication_started: bool = False
+    publication_revalidations: int = 0
+    usage_by_agent: dict[str, float] = Field(default_factory=dict)
+    usage_calls: int = 0
 
 
 Retro.model_rebuild()

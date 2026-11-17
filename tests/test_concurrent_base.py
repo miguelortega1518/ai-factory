@@ -29,9 +29,11 @@ class RaceClient(FakeClient):
     def __init__(self, other, content: str, **kw):
         super().__init__(**kw)
         self.other, self.content = other, content
+        self.raced = False
 
     def create(self, **p):
-        if p["system"].startswith(__import__("ai_factory.agents.prompts", fromlist=["x"]).GATEKEEPER):
+        if not self.raced and p["system"].startswith(__import__("ai_factory.agents.prompts", fromlist=["x"]).GATEKEEPER):
+            self.raced = True
             (self.other / "otra.py").write_text(self.content)
             git(self.other, "add", "-A")
             git(self.other, "commit", "-q", "-m", "otra tarea")
@@ -69,7 +71,7 @@ def test_base_change_that_breaks_tests_is_not_pushed(repo, cfg, tmp_path):
 
     client.create = create
     state = Factory(cfg, client, log=lambda *_: None).run(task_from_text("Añade add"))
-    assert state.status == RunStatus.FAILED
+    assert state.status == RunStatus.RECOVERABLE
     assert "verificación falla" in state.error
     files = git(repo, "ls-tree", "-r", "--name-only", "origin/main").split()
     assert "calc.py" not in files  # nada sin verificar llegó a la base

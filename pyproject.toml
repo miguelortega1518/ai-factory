@@ -28,4 +28,4 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 
 [tool.setuptools.package-data]
-ai_factory = ["factory.example.toml"]
+ai_factory = ["factory.example.toml", "upload-checkpoint.cjs"]
