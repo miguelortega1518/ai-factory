@@ -174,6 +174,7 @@ otro modelo continúa automáticamente. Se desactiva con `use_fallbacks = false`
 
 ## Seguridad
 
+- Los agentes no pueden escribir en `protected_paths` (por defecto `.github/workflows/**`): Claude Code lo deniega y, si aun así cambia algo, la fábrica lo deshace tras cada iteración. Los workflows se ejecutan con los secretos del repo antes de que nadie los revise, así que los añade una persona; por eso el token de la fábrica no necesita el permiso `workflow`.
 - Los agentes sólo pueden leer y escribir dentro del worktree de su ejecución; `.git` está vetado.
 - `run_command` sólo admite los binarios de `allowed_commands`, y bloquea `git push/reset/checkout/rebase/clean`.
 - Nada llega a la rama base sin tests en verde, aprobación del Aprobador y, si es crítico, un humano.

@@ -86,6 +86,10 @@ class FactoryConfig:
     )
     max_iterations: int = 3
     max_agent_turns: int = 60
+    # Rutas que los agentes nunca pueden cambiar: si el Builder las toca, la fábrica lo deshace. Por defecto
+    # los workflows de GitHub Actions: se ejecutan con los secretos del repo antes de que nadie los revise,
+    # y el token de la fábrica no debe tener el permiso `workflow` (GitHub rechazaría el push).
+    protected_paths: list[str] = field(default_factory=lambda: [".github/workflows/**"])
     # Rutas que se consideran "núcleo": si se tocan, siempre se exige aprobación humana.
     core_paths: list[str] = field(default_factory=list)
     # Qué hacer con cambios de bajo riesgo: "merge" (fusiona en base_branch y hace push),

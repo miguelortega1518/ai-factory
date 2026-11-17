@@ -40,6 +40,8 @@ _DENY = [
     "Bash(git push *)", "Bash(git commit *)", "Bash(git reset *)", "Bash(git checkout *)",
     "Bash(git rebase *)", "Bash(git clean *)", "Bash(git branch *)", "Bash(git worktree *)",
     "Bash(npx *)", "Bash(curl *)", "Bash(wget *)", "Bash(rm -rf *)",
+    # Los workflows se ejecutan con los secretos del repo: los agentes no los escriben (ver protected_paths).
+    "Edit(.github/workflows/**)", "Write(.github/workflows/**)",
 ]
 
 BRAIN_HINT = (
