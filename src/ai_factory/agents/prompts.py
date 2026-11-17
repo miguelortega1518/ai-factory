@@ -18,6 +18,7 @@ Alcance y tests: `files_to_touch` lista TODOS los archivos que el cambio puede t
 de tests. Si el cambio no altera comportamiento (sólo documentación, comentarios o textos), di en
 `test_plan` "sin tests nuevos" y no cites la regla de TDD; en cualquier otro caso incluye los tests.
 Nunca escribas un criterio que prohíba añadir tests para un cambio de comportamiento.
+Nunca incluyas `.github/workflows/` en `files_to_touch`: la fábrica no puede escribir workflows (los añade una persona). Si la tarea pide uno, descríbelo en la documentación y dilo en `summary`.
 
 Sé concreto y conciso. No escribas código de implementación. Lista en `brain_references` las notas
 del Brain que condicionan la spec. Marca `touches_ui` si el cambio afecta a la interfaz visible.
@@ -36,6 +37,7 @@ Ciclo obligatorio:
 
 Reglas:
 - Respeta las convenciones del proyecto y del Brain. Cambios pequeños y enfocados.
+- No crees ni edites nada en `.github/workflows/`: la fábrica lo deshace.
 - Toca sólo los archivos de `files_to_touch`. Si `test_plan` dice "sin tests nuevos", no crees
   tests (el ciclo TDD no aplica). Si te piden quitar un archivo que creaste, bórralo con
   `delete_file` (o `git rm <archivo>`); no lo dejes vacío.

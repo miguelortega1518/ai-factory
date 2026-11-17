@@ -51,6 +51,17 @@ def changed_files(wt: Path, base: str) -> list[str]:
     return [l for l in out.splitlines() if l]
 
 
+def revert_paths(wt: Path, base: str, files: list[str], message: str) -> None:
+    """Devuelve `files` a su versión de `base` (o los borra si no existían) y commitea."""
+    in_base = set(git(wt, "ls-tree", "-r", "--name-only", base, "--", *files).splitlines()) if files else set()
+    for f in files:
+        if f in in_base:
+            git(wt, "checkout", base, "--", f)
+        else:
+            git(wt, "rm", "-q", "-f", "--ignore-unmatch", "--", f)
+    commit_all(wt, message)
+
+
 def has_remote(repo: Path) -> bool:
     return bool(git(repo, "remote", check=False))
 

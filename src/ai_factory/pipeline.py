@@ -74,6 +74,17 @@ class Factory:
         audit.artifact("qa.json", report.model_dump_json(indent=2))
         return report, shots
 
+    def _guard_protected(self, wt: Path, audit: AuditLog) -> list[str]:
+        """Deshace los cambios del Builder en `protected_paths` (p. ej. .github/workflows)."""
+        touched = [f for f in git_ops.changed_files(wt, self.cfg.base_branch)
+                   if any(fnmatch.fnmatch(f, p) for p in self.cfg.protected_paths)]
+        if touched:
+            git_ops.revert_paths(wt, self.cfg.base_branch, touched, "factory: deshacer cambios en rutas protegidas")
+            audit.event("factory", "protected_paths_reverted", files=touched)
+            self.log(f"  ⚠ Rutas protegidas: se deshicieron los cambios en {', '.join(touched)} "
+                     "(los añade una persona).")
+        return touched
+
     @contextmanager
     def _stage(self, state: RunState, name: str):
         t0 = time.monotonic()
@@ -125,6 +136,7 @@ class Factory:
                 with self._stage(state, "build"):
                     state.build = agents.build(state.spec, ws, brain, feedback)
                 git_ops.commit_all(wt, f"factory: {task.title} (iteración {i})")
+                self._guard_protected(wt, audit)
 
                 with self._stage(state, "tests"):
                     ok, test_out = self._run_tests(wt)
