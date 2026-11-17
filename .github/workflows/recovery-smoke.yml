@@ -1,0 +1,108 @@
+name: Recovery across real runners
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/recovery-smoke.yml'
+      - 'scripts/recovery_smoke.py'
+      - 'src/ai_factory/**'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  prepare-builder:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_id: ${{ steps.prepare.outputs.artifact_id }}
+      run_id: ${{ steps.prepare.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e '.[dev]'
+      - run: npm install --prefix "$RUNNER_TEMP/artifact-client" --ignore-scripts --no-audit --no-fund @actions/artifact@2.3.2
+      - id: prepare
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {spawnSync} = require('node:child_process');
+            const path = require('node:path');
+            const env = {...process.env,
+              FACTORY_CHECKPOINT_UPLOADER: `node "${path.join(process.env.GITHUB_WORKSPACE,'src/ai_factory/upload-checkpoint.cjs')}"`,
+              FACTORY_ARTIFACT_MODULE: path.join(process.env.RUNNER_TEMP,'artifact-client/node_modules/@actions/artifact')};
+            const r = spawnSync('python',['scripts/recovery_smoke.py','prepare','builder'],{env,stdio:'inherit'});
+            if(r.status !== 0) throw new Error(`Source failed: ${r.status}`);
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-builder
+          path: smoke-source.json
+  prepare-review:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_id: ${{ steps.prepare.outputs.artifact_id }}
+      run_id: ${{ steps.prepare.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e '.[dev]'
+      - run: npm install --prefix "$RUNNER_TEMP/artifact-client" --ignore-scripts --no-audit --no-fund @actions/artifact@2.3.2
+      - id: prepare
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {spawnSync} = require('node:child_process');
+            const path = require('node:path');
+            const env = {...process.env,
+              FACTORY_CHECKPOINT_UPLOADER: `node "${path.join(process.env.GITHUB_WORKSPACE,'src/ai_factory/upload-checkpoint.cjs')}"`,
+              FACTORY_ARTIFACT_MODULE: path.join(process.env.RUNNER_TEMP,'artifact-client/node_modules/@actions/artifact')};
+            const r = spawnSync('python',['scripts/recovery_smoke.py','prepare','review'],{env,stdio:'inherit'});
+            if(r.status !== 0) throw new Error(`Source failed: ${r.status}`);
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-review
+          path: smoke-source.json
+  resume-builder:
+    needs: prepare-builder
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e '.[dev]'
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.prepare-builder.outputs.artifact_id }}
+          path: ${{ runner.temp }}/checkpoint
+          merge-multiple: true
+      - env:
+          RECOVERY_RUN_ID: ${{ needs.prepare-builder.outputs.run_id }}
+        run: python scripts/recovery_smoke.py resume builder --run-id "$RECOVERY_RUN_ID" --package "$RUNNER_TEMP/checkpoint"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: result-builder
+          path: smoke-result.json
+  resume-review:
+    needs: prepare-review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e '.[dev]'
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.prepare-review.outputs.artifact_id }}
+          path: ${{ runner.temp }}/checkpoint
+          merge-multiple: true
+      - env:
+          RECOVERY_RUN_ID: ${{ needs.prepare-review.outputs.run_id }}
+        run: python scripts/recovery_smoke.py resume review --run-id "$RECOVERY_RUN_ID" --package "$RUNNER_TEMP/checkpoint"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: result-review
+          path: smoke-result.json
