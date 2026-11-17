@@ -12,6 +12,7 @@ from ai_factory.pipeline import Factory
 from ai_factory.quota import (
     QuotaExhausted,
     check,
+    is_hard_limit,
     pending_attempts,
     retry_paused,
     retry_time,
@@ -154,10 +155,29 @@ def test_dispatch_carries_checkpoint_and_keeps_label_when_dispatch_fails(cfg):
     assert not any('DELETE' in a for a, _ in gh.writes)
 
 
-def test_monthly_limit_is_not_retried_hourly(cfg):
+def test_monthly_limit_without_reset_time_is_not_retried_hourly(cfg):
     cfg.github_repo = 'o/r'
-    data = {'status':'paused', 'retry_at':at(9).isoformat(), 'error':'monthly spend limit; 5-hour limit resets 9am'}
-    gh = FakeGh({1:[{'body':'<!-- ai-factory:' + json.dumps(data) + ' -->'}]})
+    data = {'status': 'paused', 'retry_at': at(9).isoformat(), 'error': "You've hit your org's monthly spend limit"}
+    gh = FakeGh({1: [{'body': '<!-- ai-factory:' + json.dumps(data) + ' -->'}]})
     result = retry_paused(cfg, now=at(10), run=gh, log=lambda *_: None)
     assert result[0]['action'] == 'give_up'
     assert not any('/dispatches' in ' '.join(a) for a, _ in gh.writes)
+
+
+def test_monthly_message_with_5h_reset_is_retried(cfg):
+    # El aviso real mezcla el límite mensual y el de 5 horas; la cuota vuelve al restablecerse el de 5 horas.
+    cfg.github_repo = 'o/r'
+    data = {'status': 'failed', 'retry_at': at(9).isoformat(),
+            'error': 'QuotaExhausted: builder: límite de uso de la suscripción: ' + REAL.format(when='8:55am')}
+    gh = FakeGh({1: [{'body': '<!-- ai-factory:' + json.dumps(data) + ' -->'}]})
+    result = retry_paused(cfg, now=at(10), run=gh, log=lambda *_: None)
+    assert result[0]['action'] == 'relaunch'
+    assert any('/dispatches' in ' '.join(a) for a, _ in gh.writes)
+
+
+def test_is_hard_limit():
+    assert is_hard_limit("You've hit your org's monthly spend limit")
+    assert is_hard_limit("weekly limit reached")
+    assert not is_hard_limit(REAL.format(when='7:50am'))
+    assert not is_hard_limit("Claude AI usage limit reached")
+    assert not is_hard_limit("")

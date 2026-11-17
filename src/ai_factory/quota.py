@@ -57,6 +57,18 @@ def _tz(name: str):
         return None
 
 
+def is_hard_limit(message: str) -> bool:
+    """Límite que no se restablece en horas: menciona el mensual o el semanal y no trae hora de reinicio.
+
+    El CLI suele mezclar los dos avisos («You've hit your org's monthly spend limit · … · your 5-hour
+    limit resets 7:50am (UTC)»), y en la práctica la cuota vuelve al restablecerse el de 5 horas. Sólo
+    si no hay hora de reinicio se trata como límite duro y no se reintenta cada hora.
+    """
+    text = (message or "").lower()
+    return ("monthly" in text or "weekly" in text) and not _RESET_RE.search(message or "") \
+        and "resets" not in text
+
+
 def retry_time(message: str, now: datetime | None = None) -> datetime | None:
     """Si el mensaje es de límite de uso, la hora (UTC) a partir de la que reintentar; si no, None."""
     if not message or not _LIMIT_RE.search(message):
@@ -155,9 +167,7 @@ def retry_paused(cfg: FactoryConfig, *, now: datetime | None = None, dry_run: bo
         if not retry_at:
             # Ya no está en espera (otra ejecución terminó): sólo se quita la etiqueta.
             entry["action"] = "clear"
-        elif "monthly" in str(last.get("error", "")).lower() or "weekly" in str(last.get("error", "")).lower():
-            entry["action"] = "give_up"
-        elif attempts > cfg.quota_max_retries:
+        elif is_hard_limit(str(last.get("error", ""))) or attempts > cfg.quota_max_retries:
             entry["action"] = "give_up"
         elif datetime.fromisoformat(retry_at) <= now:
             entry["action"] = "relaunch"
@@ -199,4 +209,4 @@ def retry_paused(cfg: FactoryConfig, *, now: datetime | None = None, dry_run: bo
     return results
 
 
-__all__ = ["QuotaExhausted", "check", "fmt", "pending_attempts", "retry_paused", "retry_time"]
+__all__ = ["QuotaExhausted", "check", "fmt", "is_hard_limit", "pending_attempts", "retry_paused", "retry_time"]
